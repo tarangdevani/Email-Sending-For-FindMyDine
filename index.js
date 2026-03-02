@@ -1118,6 +1118,36 @@ app.post("/api/bulk-stop", (req, res) => {
   res.json({ success: true, message: "Stop signal sent" });
 });
 
+app.get("/api/active-batches", async (req, res) => {
+  try {
+    const firestore = initFirebase();
+    const snapshot = await firestore.collection("email_batches")
+      .where("status", "==", "active")
+      .orderBy("createdAt", "desc")
+      .get();
+      
+    const batches = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      batches.push({
+        id: doc.id,
+        subject: data.subject,
+        progressIndex: data.progressIndex || 0,
+        totalEmails: data.emails ? data.emails.length : 0,
+        startTime: data.startTime || 'Immediate',
+        dailyLimit: data.dailyLimit || 'None',
+        dailySentCount: data.dailySentCount || 0,
+        createdAt: data.createdAt
+      });
+    });
+    
+    res.json({ success: true, batches });
+  } catch (error) {
+    console.error("Error fetching active batches:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch active batches", error: error.message });
+  }
+});
+
 // ─── Scraper API Routes ───────────────────────────────────
 
 // Get scraper status

@@ -73,7 +73,13 @@
   };
 
   // ── State ───────────────────────────────────────────────
-  let bodyMode = "text"; // "text" or "html"
+  let bodyMode = "text";
+  // Active Batches elements
+  const activeBatchesList = document.getElementById("activeBatchesList");
+  const btnRefreshBatches = document.getElementById("btnRefreshBatches");
+  let activeBatchesInterval;
+
+  // Track attachments
   let attachedFiles = [];
   let emailCount = 0;
   let sendMethod = "manual"; // "manual" or "database"
@@ -91,6 +97,8 @@
     loadConfig();
     loadHistory();
     startServerClock();
+    fetchActiveBatches(); // Initial fetch for active batches
+    activeBatchesInterval = setInterval(fetchActiveBatches, 5000); // refresh every 5s
   }
 
   // ── Server Clock ───────────────────────────────────────
