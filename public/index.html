@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A beautiful, modern email sending application. Compose and send emails with attachments, CC/BCC support, and track your sent history.">
+  <title>Email Send — Compose & Send Emails</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✉️</text></svg>">
+</head>
+<body>
+
+  <!-- Animated Background Orbs -->
+  <div class="bg-effects">
+    <div class="bg-orb bg-orb-1"></div>
+    <div class="bg-orb bg-orb-2"></div>
+    <div class="bg-orb bg-orb-3"></div>
+  </div>
+
+  <div class="app">
+
+    <!-- ═══ Header ═══ -->
+    <header class="header">
+      <div class="header-inner">
+        <a href="/" class="logo">
+          <div class="logo-icon">✉️</div>
+          <span class="logo-text">Email Send</span>
+        </a>
+        <div class="header-status">
+          <span class="status-dot"></span>
+          <span id="senderEmail">Loading...</span>
+        </div>
+        <div class="header-nav">
+          <a href="/scraper.html" class="header-link">🔍 Email Scraper</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- ═══ Tab Navigation ═══ -->
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-tab="compose" id="tab-compose">
+        <span class="tab-icon">✏️</span>
+        Compose
+      </button>
+      <button class="nav-tab" data-tab="history" id="tab-history">
+        <span class="tab-icon">📋</span>
+        Sent History
+        <span class="badge" id="historyBadge" style="display:none">0</span>
+      </button>
+    </nav>
+
+    <!-- ═══ Main Content ═══ -->
+    <main class="main">
+
+      <!-- ─── Compose Tab ─── -->
+      <section class="tab-content active" id="composeTab">
+        <div class="compose-panel">
+          <div class="compose-header">
+            <h2>📨 New Email</h2>
+            <p>Compose your message and send it instantly</p>
+          </div>
+
+          <form id="emailForm" class="form-grid" enctype="multipart/form-data">
+            <!-- Recipient Method Toggle -->
+            <div class="form-group full-width">
+              <label class="form-label">
+                Recipients <span class="required">*</span>
+              </label>
+              <div class="recipient-toggle" id="recipientToggleGroup">
+                <button type="button" class="recipient-btn active" data-method="manual">
+                  <span class="recipient-btn-icon">✏️</span>
+                  <span class="recipient-btn-text">
+                    <strong>Manual Input</strong>
+                    <small>Enter emails manually</small>
+                  </span>
+                </button>
+                <button type="button" class="recipient-btn" data-method="database">
+                  <span class="recipient-btn-icon">🗄️</span>
+                  <span class="recipient-btn-text">
+                    <strong>From Database</strong>
+                    <small>Load from Firestore</small>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Manual Input -->
+            <div class="form-group full-width" id="manualInputSection">
+              <label class="form-label" for="manualEmails">
+                Email Addresses <span class="optional">(comma separated)</span>
+              </label>
+              <textarea
+                id="manualEmails"
+                class="form-textarea"
+                style="min-height:90px;"
+                placeholder="email1@example.com, email2@example.com, email3@example.com..."
+                required
+              ></textarea>
+              <span class="form-help">Separate multiple emails with commas</span>
+            </div>
+
+            <!-- Database Input -->
+            <div class="form-group full-width" id="databaseInputSection" style="display:none;">
+              <label class="form-label" for="firestorePath">
+                Firestore Path <span class="required">*</span>
+              </label>
+              <input
+                type="text"
+                id="firestorePath"
+                class="form-input"
+                placeholder="e.g. states/United States_Washington"
+              >
+              <span class="form-help">Path to a state document that contains all_emails field (same path used in scraper)</span>
+            </div>
+
+            <!-- CC / BCC Toggle -->
+            <div class="form-group full-width">
+              <div class="toggle-extras">
+                <button type="button" class="toggle-btn" id="toggleCcBcc">+ CC / BCC</button>
+                <button type="button" class="toggle-btn" id="toggleReplyTo">+ Reply-To</button>
+              </div>
+            </div>
+
+            <!-- CC & BCC Fields (hidden by default) -->
+            <div class="extras-fields" id="ccBccFields">
+              <div class="form-group">
+                <label class="form-label" for="emailCc">
+                  CC <span class="optional">(optional)</span>
+                </label>
+                <input type="email" id="emailCc" class="form-input" placeholder="cc@example.com">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="emailBcc">
+                  BCC <span class="optional">(optional)</span>
+                </label>
+                <input type="email" id="emailBcc" class="form-input" placeholder="bcc@example.com">
+              </div>
+            </div>
+
+            <!-- Reply-To Field (hidden by default) -->
+            <div class="extras-fields" id="replyToField">
+              <div class="form-group">
+                <label class="form-label" for="emailReplyTo">
+                  Reply-To <span class="optional">(optional)</span>
+                </label>
+                <input type="email" id="emailReplyTo" class="form-input" placeholder="reply-to@example.com">
+              </div>
+            </div>
+
+            <!-- Batch Schedule Options -->
+            <div class="form-row full-width" id="batchOptionsSection">
+              <div class="form-group">
+                <label class="form-label" for="batchStartTime">
+                  ⏰ Start Time <span class="optional">(optional)</span>
+                  <span class="server-clock" id="serverClock" title="Server time"></span>
+                </label>
+                <input
+                  type="time"
+                  id="batchStartTime"
+                  class="form-input"
+                >
+                <span class="form-help">Time to start sending emails every day</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="batchDailyLimit">
+                  📊 Daily Limit <span class="optional">(optional)</span>
+                </label>
+                <input
+                  type="number"
+                  id="batchDailyLimit"
+                  class="form-input"
+                  placeholder="e.g. 200"
+                  min="1"
+                >
+                <span class="form-help">Max emails to send per day from this batch</span>
+              </div>
+            </div>
+
+            <!-- Subject -->
+            <div class="form-group full-width">
+              <label class="form-label" for="emailSubject">
+                Subject <span class="required">*</span>
+              </label>
+              <input
+                type="text"
+                id="emailSubject"
+                class="form-input"
+                placeholder="Enter email subject..."
+                required
+              >
+            </div>
+
+            <!-- Body -->
+            <div class="form-group full-width">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label class="form-label" for="emailBody">
+                  Body <span class="required">*</span>
+                </label>
+                <div class="body-toggle">
+                  <button type="button" class="body-toggle-btn active" data-mode="text">Plain Text</button>
+                  <button type="button" class="body-toggle-btn" data-mode="html">HTML</button>
+                </div>
+              </div>
+              <textarea
+                id="emailBody"
+                class="form-textarea"
+                placeholder="Type your message here..."
+                required
+              ></textarea>
+              <span class="form-help" id="bodyModeHint">Sending as plain text</span>
+            </div>
+
+            <!-- Attachments -->
+            <div class="form-group full-width">
+              <label class="form-label">
+                Attachments <span class="optional">(optional, max 5 files, 10MB each)</span>
+              </label>
+              <div class="file-upload-area" id="fileDropArea">
+                <input type="file" class="file-upload-input" id="fileInput" multiple accept="*/*">
+                <div class="file-upload-icon">📎</div>
+                <div class="file-upload-text">
+                  Drag & drop files here, or <span>browse</span>
+                </div>
+                <div class="file-upload-hint">Supports any file type up to 10MB each</div>
+              </div>
+              <div class="attached-files" id="attachedFiles"></div>
+            </div>
+
+            <!-- Actions -->
+            <div class="form-actions full-width">
+              <button type="button" class="btn-clear" id="btnClear">Clear Form</button>
+              <button type="submit" class="btn-send" id="btnSend">
+                <span class="btn-content">
+                  <span class="send-icon">🚀</span>
+                  <span class="spinner"></span>
+                  Send Email
+                </span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- ─── History Tab ─── -->
+      <section class="tab-content" id="historyTab">
+        <div class="history-panel">
+          <div class="history-header">
+            <h2>📋 Sent History</h2>
+            <span class="history-count" id="historyCount">0 emails sent</span>
+          </div>
+          <div id="emailList">
+            <div class="empty-state">
+              <div class="empty-icon">📭</div>
+              <h3>No emails sent yet</h3>
+              <p>Compose and send your first email to see it here</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ═══ Footer ═══ -->
+    <footer class="footer">
+      Email Send &copy; 2026 — Built with ❤️ using Express &amp; Nodemailer
+    </footer>
+
+  </div>
+
+  <!-- ═══ Bulk Sending Overlay ═══ -->
+  <div class="bulk-overlay" id="bulkOverlay" style="display:none;">
+    <div class="bulk-modal">
+      <div class="bulk-header">
+        <div class="bulk-header-icon">📨</div>
+        <h3>Sending Bulk Emails</h3>
+        <p class="bulk-header-sub">Sit back while we deliver your emails one by one</p>
+      </div>
+      
+      <div class="bulk-stats">
+        <div class="stat-box stat-total">
+          <span class="stat-icon">📧</span>
+          <span class="stat-value" id="bulkTotal">0</span>
+          <span class="stat-label">Total</span>
+        </div>
+        <div class="stat-box stat-success">
+          <span class="stat-icon">✅</span>
+          <span class="stat-value" id="bulkSent">0</span>
+          <span class="stat-label">Sent</span>
+        </div>
+        <div class="stat-box stat-error">
+          <span class="stat-icon">❌</span>
+          <span class="stat-value" id="bulkErrors">0</span>
+          <span class="stat-label">Failed</span>
+        </div>
+      </div>
+      
+      <div class="bulk-progress-bar">
+        <div class="bulk-progress-fill" id="bulkProgressFill"></div>
+      </div>
+
+      <div class="bulk-logs" id="bulkLogs">
+        <div class="bulk-logs-placeholder">Waiting for activity...</div>
+      </div>
+
+      <div class="bulk-actions">
+        <button type="button" class="btn-bulk-stop" id="btnBulkStop">
+          <span>⏹</span> Stop Sending
+        </button>
+        <button type="button" class="btn-bulk-close" id="btnBulkClose" style="display:none;">
+          <span>✓</span> Done — Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
