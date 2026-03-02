@@ -806,8 +806,13 @@ app.get("/api/emails", (req, res) => {
 });
 
 // Send email (supports file attachments)
-app.post("/api/send-email", upload.array("attachments", 5), async (req, res) => {
-  const { to, cc, bcc, replyTo, subject, text, html } = req.body;
+app.post("/api/send-email", upload.fields([{ name: "attachments", maxCount: 5 }, { name: "html", maxCount: 1 }]), async (req, res) => {
+  let { to, cc, bcc, replyTo, subject, text, html } = req.body;
+
+  // Extract HTML if uploaded as a file
+  if (req.files && req.files['html'] && req.files['html'].length > 0) {
+    html = req.files['html'][0].buffer.toString('utf-8');
+  }
 
   // Validation
   if (!to || !subject || (!text && !html)) {
@@ -819,8 +824,8 @@ app.post("/api/send-email", upload.array("attachments", 5), async (req, res) => 
 
   // Build attachments from uploaded files
   const attachments = [];
-  if (req.files && req.files.length > 0) {
-    for (const file of req.files) {
+  if (req.files && req.files['attachments'] && req.files['attachments'].length > 0) {
+    for (const file of req.files['attachments']) {
       attachments.push({
         filename: file.originalname,
         content: file.buffer,
@@ -900,7 +905,7 @@ app.post("/api/send-email", upload.array("attachments", 5), async (req, res) => 
 
 // ─── Bulk Email API Routes ────────────────────────────────
 
-app.post("/api/send-bulk", upload.array("attachments", 5), async (req, res) => {
+app.post("/api/send-bulk", upload.fields([{ name: "attachments", maxCount: 5 }, { name: "html", maxCount: 1 }]), async (req, res) => {
   if (bulkEmailState.isRunning) {
     return res.status(400).json({
       success: false,
@@ -908,7 +913,12 @@ app.post("/api/send-bulk", upload.array("attachments", 5), async (req, res) => {
     });
   }
 
-  const { sendMethod, firestorePath, manualEmails, subject, text, html, cc, bcc, replyTo, startTime, dailyLimit } = req.body;
+  let { sendMethod, firestorePath, manualEmails, subject, text, html, cc, bcc, replyTo, startTime, dailyLimit } = req.body;
+
+  // Extract HTML if uploaded as a file
+  if (req.files && req.files['html'] && req.files['html'].length > 0) {
+    html = req.files['html'][0].buffer.toString('utf-8');
+  }
 
   if (!subject || (!text && !html)) {
     return res.status(400).json({
@@ -954,8 +964,8 @@ app.post("/api/send-bulk", upload.array("attachments", 5), async (req, res) => {
   }
 
   const attachmentPaths = [];
-  if (req.files && req.files.length > 0) {
-    for (const file of req.files) {
+  if (req.files && req.files['attachments'] && req.files['attachments'].length > 0) {
+    for (const file of req.files['attachments']) {
       const uniqueName = Date.now() + "-" + Math.round(Math.random() * 1e9) + "-" + file.originalname;
       const savePath = path.join(uploadDir, uniqueName);
       fs.writeFileSync(savePath, file.buffer);
