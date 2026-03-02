@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Scrape emails from restaurant websites stored in Firebase Firestore. Batch process records and collect emails automatically.">
+  <title>Email Scraper — Collect Emails from Websites</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+</head>
+<body>
+
+  <!-- Animated Background Orbs -->
+  <div class="bg-effects">
+    <div class="bg-orb bg-orb-1"></div>
+    <div class="bg-orb bg-orb-2"></div>
+    <div class="bg-orb bg-orb-3"></div>
+  </div>
+
+  <div class="app">
+
+    <!-- ═══ Header ═══ -->
+    <header class="header">
+      <div class="header-inner">
+        <a href="/scraper.html" class="logo">
+          <div class="logo-icon">🔍</div>
+          <span class="logo-text">Email Scraper</span>
+        </a>
+        <div class="header-nav">
+          <a href="/" class="header-link">✉️ Email Send</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- ═══ Main Content ═══ -->
+    <main class="main">
+
+      <!-- ─── Config Panel ─── -->
+      <section class="scraper-config">
+        <div class="compose-panel">
+          <div class="compose-header">
+            <h2>🗄️ Firestore Scraper</h2>
+            <p>Enter the Firestore document path to scrape restaurant emails</p>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group full-width">
+              <label class="form-label" for="firestorePath">
+                Firestore Path <span class="required">*</span>
+              </label>
+              <input
+                type="text"
+                id="firestorePath"
+                class="form-input"
+                placeholder="places_data/United States/states/Washington"
+                value=""
+              >
+              <span class="form-help">Path to the state document containing the "restaurants" collection</span>
+            </div>
+
+            <div class="form-group full-width" id="rescrapContainer" style="display: none; margin-top: -10px; margin-bottom: 10px;">
+              <label class="form-label" style="display: flex; align-items: center; cursor: pointer; color: var(--warning, #f59e0b);">
+                <input type="checkbox" id="forceRescrapCheckbox" style="margin-right: 8px; width: 16px; height: 16px; accent-color: var(--warning, #f59e0b);">
+                <span>⚠️ All records in this path are already scraped. Force rescrap?</span>
+              </label>
+            </div>
+
+            <div class="form-actions full-width">
+              <button type="button" class="btn-send scraper-btn-start" id="btnStart">
+                <span class="btn-content">
+                  <span class="send-icon">🚀</span>
+                  <span class="spinner"></span>
+                  Start Scraping
+                </span>
+              </button>
+              <button type="button" class="btn-clear scraper-btn-stop" id="btnStop" disabled>
+                ⏹️ Stop
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── Stats Dashboard ─── -->
+      <section class="scraper-stats" id="statsSection">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon">📊</div>
+            <div class="stat-body">
+              <div class="stat-value" id="statProcessed">0 / 0</div>
+              <div class="stat-label">Records Processed</div>
+            </div>
+          </div>
+          <div class="stat-card stat-card-success">
+            <div class="stat-icon">📧</div>
+            <div class="stat-body">
+              <div class="stat-value" id="statEmails">0</div>
+              <div class="stat-label">Emails Found</div>
+            </div>
+          </div>
+          <div class="stat-card stat-card-success">
+            <div class="stat-icon">📱</div>
+            <div class="stat-body">
+              <div class="stat-value" id="statMobiles">0</div>
+              <div class="stat-label">Mobiles Found</div>
+            </div>
+          </div>
+          <div class="stat-card stat-card-error">
+            <div class="stat-icon">⚠️</div>
+            <div class="stat-body">
+              <div class="stat-value" id="statErrors">0</div>
+              <div class="stat-label">Errors</div>
+            </div>
+          </div>
+          <div class="stat-card stat-card-info">
+            <div class="stat-icon">⏱️</div>
+            <div class="stat-body">
+              <div class="stat-value" id="statStatus">Idle</div>
+              <div class="stat-label">Status</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-wrapper" id="progressWrapper">
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+          </div>
+          <div class="progress-text">
+            <span id="progressPercent">0%</span>
+            <span id="currentBusiness" class="current-business">—</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── Log Panel ─── -->
+      <section class="scraper-log-section">
+        <div class="compose-panel">
+          <div class="compose-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <h2>📋 Live Log</h2>
+              <p>Real-time scraping activity</p>
+            </div>
+            <button type="button" class="btn-clear" id="btnDownload" style="margin:0;">
+              ⬇️ Download Emails
+            </button>
+          </div>
+          <div class="log-container" id="logContainer">
+            <div class="log-empty">
+              <span>🔇</span> No activity yet. Click "Start Scraping" to begin.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── Check Emails Panel ─── -->
+      <section class="scraper-check-section">
+        <div class="compose-panel">
+          <div class="compose-header">
+            <h2>🔎 Check Emails</h2>
+            <p>Enter a state path to fetch existing emails from Firestore</p>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group full-width">
+              <label class="form-label" for="checkEmailPath">
+                State Path <span class="required">*</span>
+              </label>
+              <input
+                type="text"
+                id="checkEmailPath"
+                class="form-input"
+                placeholder="places_data/United States/states/Washington"
+              >
+              <span class="form-help">Path to the state document (e.g. places_data/United States/states/Washington)</span>
+            </div>
+
+            <div class="form-actions full-width">
+              <button type="button" class="btn-send scraper-btn-check" id="btnCheckEmails">
+                <span class="btn-content">
+                  <span class="send-icon">🔍</span>
+                  <span class="spinner"></span>
+                  Check Emails
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── Editable Emails Panel ─── -->
+      <section class="scraper-emails-section" id="emailsSection" style="display:none;">
+        <div class="compose-panel">
+          <div class="compose-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <h2>📧 Collected Emails</h2>
+              <p id="emailsSummary">0 unique emails found</p>
+            </div>
+            <div class="emails-header-actions">
+              <span class="email-path-badge" id="emailPathBadge"></span>
+            </div>
+          </div>
+          <div class="emails-editable-list" id="emailsList"></div>
+          <div class="emails-submit-bar" id="emailsSubmitBar" style="display:none;">
+            <button type="button" class="btn-send scraper-btn-validate" id="btnValidateEmails">
+              <span class="btn-content">
+                <span class="send-icon">🔍</span>
+                <span class="spinner"></span>
+                Validate Emails
+              </span>
+            </button>
+            <button type="button" class="btn-send scraper-btn-submit" id="btnSubmitEmails">
+              <span class="btn-content">
+                <span class="send-icon">✅</span>
+                <span class="spinner"></span>
+                Submit to State
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ═══ Footer ═══ -->
+    <footer class="footer">
+      Email Scraper &copy; 2026 — Built with ❤️ using Express &amp; Firebase
+    </footer>
+
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/scraper-app.js"></script>
+</body>
+</html>

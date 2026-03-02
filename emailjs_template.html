@@ -1,0 +1,138 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FindMyDine Notification</title>
+<style>
+  /* Reset */
+  body, p, h1, h2, h3, a { margin: 0; padding: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+  body { background-color: #f3f4f6; color: #1f2937; line-height: 1.6; }
+  
+  /* Container */
+  .email-container {
+    max-width: 600px;
+    margin: 40px auto;
+    background-color: #ffffff;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  }
+
+  /* Header */
+  .header {
+    background-color: #ffffff;
+    padding: 32px;
+    text-align: center;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .logo {
+    font-size: 24px;
+    font-weight: 900;
+    color: #111827;
+    letter-spacing: -0.5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .logo span { color: #f97316; } /* Primary Orange */
+
+  /* Content */
+  .content {
+    padding: 40px 32px;
+    text-align: left;
+  }
+  .greeting {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 16px;
+  }
+  .message {
+    font-size: 16px;
+    color: #4b5563;
+    margin-bottom: 32px;
+  }
+
+  /* Button */
+  .btn-wrapper {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .btn {
+    display: inline-block;
+    background-color: #f97316; /* Primary Orange */
+    color: #ffffff !important;
+    font-weight: 700;
+    font-size: 16px;
+    text-decoration: none;
+    padding: 16px 32px;
+    border-radius: 999px;
+    box-shadow: 0 4px 14px 0 rgba(249, 115, 22, 0.39);
+    transition: background-color 0.2s ease-in-out;
+  }
+  .btn:hover {
+    background-color: #ea580c;
+  }
+
+  /* Link Fallback */
+  .fallback-link {
+    font-size: 13px;
+    color: #9ca3af;
+    word-break: break-all;
+    margin-top: 24px;
+    text-align: center;
+  }
+  .fallback-link a {
+    color: #f97316;
+    text-decoration: underline;
+  }
+
+  /* Footer */
+  .footer {
+    background-color: #f9fafb;
+    padding: 24px;
+    text-align: center;
+    font-size: 12px;
+    color: #9ca3af;
+    border-top: 1px solid #f3f4f6;
+  }
+</style>
+</head>
+<body>
+
+<div class="email-container">
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      FindMyDine<span>.</span>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="content">
+    <div class="greeting">Hello {{to_name}},</div>
+    <div class="message">
+      {{message}}
+    </div>
+
+    <div class="btn-wrapper">
+      <a href="{{action_url}}" class="btn" target="_blank">{{action_text}}</a>
+    </div>
+
+    <div class="fallback-link">
+      <p>Button not working? Copy and paste this link:</p>
+      <a href="{{action_url}}">{{action_url}}</a>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <p>&copy; 2024 FindMyDine. All rights reserved.</p>
+    <p style="margin-top: 8px;">This is an automated notification. Please do not reply.</p>
+  </div>
+</div>
+
+</body>
+</html>
