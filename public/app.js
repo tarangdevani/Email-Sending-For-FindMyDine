@@ -624,6 +624,64 @@
     toast.addEventListener("animationend", () => toast.remove());
   }
 
+  // ─── Active Batches Sidebar Logic ─────────────────────────
+  async function fetchActiveBatches() {
+    try {
+      const res = await fetch("/api/active-batches");
+      const data = await res.json();
+      
+      if (data.success) {
+        renderActiveBatches(data.batches);
+      }
+    } catch (err) {
+      console.error("Error fetching active batches:", err);
+    }
+  }
+
+  function renderActiveBatches(batches) {
+    if (!activeBatchesList) return;
+    
+    if (batches.length === 0) {
+      activeBatchesList.innerHTML = '<div class="empty-state">No active batches</div>';
+      return;
+    }
+    
+    let html = '';
+    batches.forEach(batch => {
+      const isScheduled = batch.startTime && batch.startTime !== 'Immediate';
+      const progressPercent = batch.totalEmails > 0 
+        ? Math.min(100, Math.round((batch.progressIndex / batch.totalEmails) * 100))
+        : 0;
+        
+      html += `
+        <div class="batch-card">
+          <div class="batch-title" title="${batch.subject}">${batch.subject || 'No Subject'}</div>
+          
+          <div class="batch-stats">
+            <span>Progress</span>
+            <span>${batch.progressIndex} / ${batch.totalEmails}</span>
+          </div>
+          
+          <div class="batch-progress-bar">
+            <div class="batch-progress-fill" style="width: ${progressPercent}%"></div>
+          </div>
+          
+          <div class="batch-meta">
+            <span>Limit: ${batch.dailyLimit !== 'None' ? batch.dailyLimit + '/day' : 'None'}</span>
+            <span>${isScheduled ? 'Starts: ' + batch.startTime : 'Immediate'}</span>
+          </div>
+        </div>
+      `;
+    });
+    
+    activeBatchesList.innerHTML = html;
+  }
+
+  // Refresh manually
+  if (btnRefreshBatches) {
+    btnRefreshBatches.addEventListener("click", fetchActiveBatches);
+  }
+
   // ── Utilities ───────────────────────────────────────────
   function escapeHtml(str) {
     if (!str) return "";

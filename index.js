@@ -957,20 +957,29 @@ app.post("/api/send-bulk", upload.fields([{ name: "attachments", maxCount: 5 }, 
     return res.status(400).json({ success: false, message: "No valid emails found to send." });
   }
 
-  // Handle local file copying for batch processing
-  const uploadDir = path.join(__dirname, "uploads");
-  if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-  }
-
-  const attachmentPaths = [];
+  // Prepare attachments as Base64 for Firestore (to avoid Vercel read-only filesystem errors)
+  const attachmentsList = [];
+  let totalAttachmentSize = 0;
+  
   if (req.files && req.files['attachments'] && req.files['attachments'].length > 0) {
     for (const file of req.files['attachments']) {
-      const uniqueName = Date.now() + "-" + Math.round(Math.random() * 1e9) + "-" + file.originalname;
-      const savePath = path.join(uploadDir, uniqueName);
-      fs.writeFileSync(savePath, file.buffer);
-      attachmentPaths.push("uploads/" + uniqueName);
+      totalAttachmentSize += file.size;
+      attachmentsList.push({
+        filename: file.originalname,
+        content: file.buffer.toString('base64'),
+        encoding: 'base64',
+        contentType: file.mimetype
+      });
     }
+  }
+
+  // Firestore has a 1MB limit per document. If attachments are too large, block the request.
+  // 1MB = 1048576 bytes. Base64 encoding increases size by ~33%.
+  if (totalAttachmentSize * 1.33 > 900000) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "Total attachment size is too large for bulk sending (Limit is ~700KB total). Please send smaller files or use the individual Send Email tab." 
+    });
   }
 
   // Create Batch Record in Firestore
@@ -993,7 +1002,7 @@ app.post("/api/send-bulk", upload.fields([{ name: "attachments", maxCount: 5 }, 
      progressIndex: 0,
      status: "active", // active, completed
      createdAt: new Date().toISOString(),
-     attachmentPaths: attachmentPaths,
+     attachments: attachmentsList,
   };
 
   try {
@@ -1055,7 +1064,7 @@ async function runBulkEmail(batchId, emails, mailOptionsBase, batchData) {
         body: options.text || options.html,
         isHtml: !!options.html && !options.text,
         attachmentCount: options.attachments ? options.attachments.length : 0,
-        attachmentNames: options.attachments ? options.attachments.map((a) => path.basename(a.path || a.filename)) : [],
+        attachmentNames: options.attachments ? options.attachments.map((a) => a.filename) : [],
         messageId: info.messageId,
         sentAt: new Date().toISOString(),
         status: "sent",
@@ -1076,6 +1085,7 @@ async function runBulkEmail(batchId, emails, mailOptionsBase, batchData) {
         body: mailOptionsBase.text || mailOptionsBase.html,
         isHtml: !!mailOptionsBase.html && !mailOptionsBase.text,
         attachmentCount: mailOptionsBase.attachments ? mailOptionsBase.attachments.length : 0,
+        attachmentNames: mailOptionsBase.attachments ? mailOptionsBase.attachments.map((a) => a.filename) : [],
         sentAt: new Date().toISOString(),
         status: "failed",
         error: err.message,
@@ -1084,7 +1094,7 @@ async function runBulkEmail(batchId, emails, mailOptionsBase, batchData) {
       await updateMetrics(firestore, "failed", batchData.sendMethod === "database", batchData.firestorePath, recipient);
     }
 
-    // Save progress mapping to Firestore
+    // Save progress mapping to Firestore (using a slim update so we don't send huge base64 data back and forth)
     batchData.progressIndex = i + 1;
     await batchRef.update({
        progressIndex: batchData.progressIndex,
