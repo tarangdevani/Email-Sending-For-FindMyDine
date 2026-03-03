@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   Email Send — Client Application
+   FindMyDine — Email Campaign Manager Client
    ═══════════════════════════════════════════════════════════ */
 
 (function () {
@@ -30,6 +30,9 @@
     batchStartTime: $("#batchStartTime"),
     batchDailyLimit: $("#batchDailyLimit"),
 
+    // Provider Toggle
+    providerBtns: $$(".provider-btn"),
+
     // Form
     form: $("#emailForm"),
     cc: $("#emailCc"),
@@ -53,9 +56,10 @@
     // Buttons
     btnSend: $("#btnSend"),
     btnClear: $("#btnClear"),
+    btnLogout: $("#btnLogout"),
 
-    // History
-    emailList: $("#emailList"),
+    // History (Batch Listing)
+    batchListContainer: $("#batchListContainer"),
     historyCount: $("#historyCount"),
 
     // Bulk Modal
@@ -68,49 +72,70 @@
     btnBulkStop: $("#btnBulkStop"),
     btnBulkClose: $("#btnBulkClose"),
 
+    // Detail Modal
+    detailOverlay: $("#detailOverlay"),
+
+    // HTML Preview
+    htmlPreviewSection: $("#htmlPreviewSection"),
+    btnPreviewHtml: $("#btnPreviewHtml"),
+    htmlPreviewContainer: $("#htmlPreviewContainer"),
+    htmlPreviewFrame: $("#htmlPreviewFrame"),
+
+    // Analytics
+    statTotalEmails: $("#statTotalEmails"),
+    statTotalSent: $("#statTotalSent"),
+    statTotalBounced: $("#statTotalBounced"),
+    statGmailSent: $("#statGmailSent"),
+    statAwsSent: $("#statAwsSent"),
+    analyticsChart: $("#analyticsChart"),
+
     // Toast
     toastContainer: $("#toastContainer"),
   };
 
   // ── State ───────────────────────────────────────────────
   let bodyMode = "text";
-  // Active Batches elements
-  const activeBatchesList = document.getElementById("activeBatchesList");
-  const btnRefreshBatches = document.getElementById("btnRefreshBatches");
-  let activeBatchesInterval;
-
-  // Track attachments
   let attachedFiles = [];
-  let emailCount = 0;
-  let sendMethod = "manual"; // "manual" or "database"
+  let sendMethod = "manual";
+  let selectedProvider = "gmail";
   let bulkPollInterval = null;
+  let analyticsChartInstance = null;
+  let currentPeriod = "day";
+  let currentProviderFilter = "all";
+
+  // Pagination state
+  let currentBatchCursor = null;
+  let hasMoreBatches = true;
+  let isLoadingBatches = false;
 
   // ── Init ────────────────────────────────────────────────
   function init() {
     setupTabs();
     setupToggles();
     setupRecipientToggle();
+    setupProviderToggle();
     setupBodyToggle();
     setupFileUpload();
     setupForm();
     setupBulkModal();
+    setupLogout();
+    setupHtmlPreview();
+    setupAnalyticsFilters();
     loadConfig();
-    loadHistory();
     startServerClock();
-    fetchActiveBatches(); // Initial fetch for active batches
-    activeBatchesInterval = setInterval(fetchActiveBatches, 5000); // refresh every 5s
+    loadAnalytics();
   }
 
   // ── Server Clock ───────────────────────────────────────
   function startServerClock() {
     const clockEl = document.getElementById("serverClock");
     if (!clockEl) return;
-
-    let serverOffset = 0; // ms difference between server and local
+    let serverOffset = 0;
 
     async function syncServerTime() {
       try {
         const res = await fetch("/api/server-time");
+        if (res.status === 401) { window.location.href = "/login.html"; return; }
         const data = await res.json();
         const serverTime = new Date(data.iso).getTime();
         serverOffset = serverTime - Date.now();
@@ -128,7 +153,7 @@
 
     syncServerTime().then(tick);
     setInterval(tick, 1000);
-    setInterval(syncServerTime, 60000); // Re-sync every minute
+    setInterval(syncServerTime, 60000);
   }
 
   // ── Tab Navigation ──────────────────────────────────────
@@ -140,11 +165,20 @@
         tab.classList.add("active");
         const target = tab.dataset.tab;
         $(`#${target}Tab`).classList.add("active");
-
         if (target === "history") {
-          loadHistory();
+          loadBatches(true);
         }
       });
+    });
+
+    // Infinite scroll for History tab
+    window.addEventListener("scroll", () => {
+      // Load more if user is near bottom of the page
+      if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 200) {
+        if (els.historyTab.classList.contains("active")) {
+          loadBatches(false);
+        }
+      }
     });
   }
 
@@ -158,7 +192,6 @@
         els.bcc.value = "";
       }
     });
-
     els.toggleReplyTo.addEventListener("click", () => {
       els.toggleReplyTo.classList.toggle("active");
       els.replyToField.classList.toggle("show");
@@ -175,11 +208,9 @@
         els.recipientBtns.forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         sendMethod = btn.dataset.method;
-
         if (sendMethod === "manual") {
           els.manualInputSection.style.display = "block";
           els.databaseInputSection.style.display = "none";
-          // Fix required attribute
           els.manualEmails.required = true;
           els.firestorePath.required = false;
         } else {
@@ -199,36 +230,61 @@
         $$(".body-toggle-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         bodyMode = btn.dataset.mode;
-
         if (bodyMode === "html") {
           els.body.placeholder = "<h1>Hello!</h1>\n<p>Your HTML email content here...</p>";
           els.bodyModeHint.textContent = "Sending as HTML — use valid HTML markup";
+          els.htmlPreviewSection.style.display = "block";
         } else {
           els.body.placeholder = "Type your message here...";
           els.bodyModeHint.textContent = "Sending as plain text";
+          els.htmlPreviewSection.style.display = "none";
+          els.htmlPreviewContainer.style.display = "none";
         }
       });
     });
   }
 
+  // ── HTML Preview ────────────────────────────────────────
+  function setupHtmlPreview() {
+    if (!els.btnPreviewHtml) return;
+    els.btnPreviewHtml.addEventListener("click", () => {
+      const htmlContent = els.body.value.trim();
+      if (!htmlContent) {
+        showToast("Enter HTML content first", "error");
+        return;
+      }
+      els.htmlPreviewContainer.style.display = "block";
+      const doc = els.htmlPreviewFrame.contentDocument || els.htmlPreviewFrame.contentWindow.document;
+      doc.open();
+      doc.write(htmlContent);
+      doc.close();
+    });
+  }
+
+  // ── Logout ─────────────────────────────────────────────
+  function setupLogout() {
+    if (!els.btnLogout) return;
+    els.btnLogout.addEventListener("click", async () => {
+      try {
+        await fetch("/api/logout", { method: "POST" });
+      } catch (e) { /* ignore */ }
+      window.location.href = "/login.html";
+    });
+  }
+
   // ── File Upload ─────────────────────────────────────────
   function setupFileUpload() {
-    // Click to select files
     els.fileInput.addEventListener("change", (e) => {
       addFiles(e.target.files);
-      els.fileInput.value = ""; // reset so same file can be added again
+      els.fileInput.value = "";
     });
-
-    // Drag & drop
     els.fileDropArea.addEventListener("dragover", (e) => {
       e.preventDefault();
       els.fileDropArea.classList.add("dragover");
     });
-
     els.fileDropArea.addEventListener("dragleave", () => {
       els.fileDropArea.classList.remove("dragover");
     });
-
     els.fileDropArea.addEventListener("drop", (e) => {
       e.preventDefault();
       els.fileDropArea.classList.remove("dragover");
@@ -238,42 +294,26 @@
 
   function addFiles(fileList) {
     for (const file of fileList) {
-      if (attachedFiles.length >= 5) {
-        showToast("Maximum 5 attachments allowed", "error");
-        break;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        showToast(`${file.name} exceeds 10MB limit`, "error");
-        continue;
-      }
-      // Avoid duplicates
-      if (attachedFiles.some((f) => f.name === file.name && f.size === file.size)) {
-        continue;
-      }
+      if (attachedFiles.length >= 5) { showToast("Maximum 5 attachments allowed", "error"); break; }
+      if (file.size > 10 * 1024 * 1024) { showToast(`${file.name} exceeds 10MB limit`, "error"); continue; }
+      if (attachedFiles.some((f) => f.name === file.name && f.size === file.size)) continue;
       attachedFiles.push(file);
     }
     renderAttachedFiles();
   }
 
   function renderAttachedFiles() {
-    els.attachedFiles.innerHTML = attachedFiles
-      .map(
-        (file, i) => `
+    els.attachedFiles.innerHTML = attachedFiles.map((file, i) => `
       <div class="attached-file">
         <span class="file-icon">📄</span>
         <span class="file-name">${escapeHtml(file.name)}</span>
         <span class="file-size">(${formatFileSize(file.size)})</span>
         <button type="button" class="remove-file" data-index="${i}" title="Remove">&times;</button>
       </div>
-    `
-      )
-      .join("");
-
-    // Remove file buttons
+    `).join("");
     $$(".remove-file").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const idx = parseInt(btn.dataset.index);
-        attachedFiles.splice(idx, 1);
+        attachedFiles.splice(parseInt(btn.dataset.index), 1);
         renderAttachedFiles();
       });
     });
@@ -285,21 +325,18 @@
       e.preventDefault();
       await sendEmail();
     });
-
     els.btnClear.addEventListener("click", clearForm);
   }
 
   async function sendEmail() {
-    // Validate
     const subject = els.subject.value.trim();
     const body = els.body.value.trim();
-
     if (!subject) { highlightError(els.subject); return; }
     if (!body) { highlightError(els.body); return; }
 
-    // Build FormData (for file attachments)
     const formData = new FormData();
     formData.append("sendMethod", sendMethod);
+    formData.append("provider", selectedProvider);
     formData.append("subject", subject);
 
     if (sendMethod === "manual") {
@@ -312,7 +349,6 @@
       formData.append("firestorePath", firestorePath);
     }
 
-    // Batch schedule options (always sent)
     const startTime = els.batchStartTime.value;
     const dailyLimit = els.batchDailyLimit.value;
     if (startTime) formData.append("startTime", startTime);
@@ -330,36 +366,23 @@
     if (cc) formData.append("cc", cc);
     if (bcc) formData.append("bcc", bcc);
     if (replyTo) formData.append("replyTo", replyTo);
+    for (const file of attachedFiles) formData.append("attachments", file);
 
-    for (const file of attachedFiles) {
-      formData.append("attachments", file);
-    }
-
-    // UI: sending state
     els.btnSend.classList.add("sending");
     els.btnSend.querySelector(".btn-content span:last-child").textContent = "Preparing...";
 
     try {
-      const res = await fetch("/api/send-bulk", {
-        method: "POST",
-        body: formData,
-      });
-
+      const res = await fetch("/api/send-bulk", { method: "POST", body: formData });
+      if (res.status === 401) { window.location.href = "/login.html"; return; }
       const data = await res.json();
-
       if (data.success) {
         showToast(data.message, "success");
         clearForm();
-        // Only show the bulk tracking overlay if it's NOT a scheduled batch
-        // (scheduled batches run in background via cron, not immediately)
-        if (!startTime && !dailyLimit) {
-          startBulkTracking();
-        }
+        if (!startTime && !dailyLimit) startBulkTracking();
       } else {
         showToast(data.message || "Failed to start bulk send", "error");
       }
     } catch (err) {
-      console.error("Send error:", err);
       showToast("Network error — please try again", "error");
     } finally {
       els.btnSend.classList.remove("sending");
@@ -367,7 +390,7 @@
     }
   }
 
-  // ── Bulk Tracking Logic ─────────────────────────────────
+  // ── Bulk Tracking ─────────────────────────────────────
   function startBulkTracking() {
     els.bulkOverlay.style.display = "flex";
     els.btnBulkStop.style.display = "inline-block";
@@ -377,11 +400,7 @@
     els.bulkSent.textContent = "0";
     els.bulkErrors.textContent = "0";
     els.bulkProgressFill.style.width = "0%";
-    
-    // Initial fetch immediately
     pollBulkStatus();
-    
-    // Set interval for every 1 second
     if (bulkPollInterval) clearInterval(bulkPollInterval);
     bulkPollInterval = setInterval(pollBulkStatus, 1000);
   }
@@ -390,61 +409,37 @@
     try {
       const res = await fetch("/api/bulk-status");
       const data = await res.json();
-
       els.bulkTotal.textContent = data.total;
       els.bulkSent.textContent = data.sent;
       els.bulkErrors.textContent = data.errors;
-
-      // Calculate progress percentage
       const totalProcessed = data.sent + data.errors;
-      let percentage = 0;
-      if (data.total > 0) {
-        percentage = (totalProcessed / data.total) * 100;
-      }
-      els.bulkProgressFill.style.width = `${percentage}%`;
-
-      // Update logs
+      let pct = data.total > 0 ? (totalProcessed / data.total) * 100 : 0;
+      els.bulkProgressFill.style.width = `${pct}%`;
       renderBulkLogs(data.logs);
-
-      // Check if finished
       if (!data.isRunning && data.completedAt) {
         clearInterval(bulkPollInterval);
         els.btnBulkStop.style.display = "none";
         els.btnBulkClose.style.display = "inline-block";
         showToast("Bulk sending completed", "success");
-        // Also reload history in background
-        loadHistory();
       }
-    } catch (err) {
-      console.error("Error polling bulk status:", err);
-    }
+    } catch (err) { /* ignore */ }
   }
 
   function renderBulkLogs(logs) {
     if (!logs || logs.length === 0) return;
-    
-    const logsHtml = logs.map(l => {
+    els.bulkLogs.innerHTML = logs.map(l => {
       const time = new Date(l.time).toLocaleTimeString([], { hour12: false });
       return `<div class="bulk-log-item ${l.type}">[${time}] ${escapeHtml(l.message)}</div>`;
     }).join("");
-    
-    els.bulkLogs.innerHTML = logsHtml;
-    // Auto-scroll to bottom
     els.bulkLogs.scrollTop = els.bulkLogs.scrollHeight;
   }
 
   function setupBulkModal() {
     els.btnBulkStop.addEventListener("click", async () => {
       if (!confirm("Are you sure you want to stop sending emails?")) return;
-      
-      try {
-        await fetch("/api/bulk-stop", { method: "POST" });
-        showToast("Stop signal sent", "info");
-      } catch (err) {
-        showToast("Failed to stop", "error");
-      }
+      try { await fetch("/api/bulk-stop", { method: "POST" }); showToast("Stop signal sent", "info"); }
+      catch (err) { showToast("Failed to stop", "error"); }
     });
-
     els.btnBulkClose.addEventListener("click", () => {
       els.bulkOverlay.style.display = "none";
     });
@@ -470,8 +465,8 @@
     $(".body-toggle-btn[data-mode='text']").classList.add("active");
     els.body.placeholder = "Type your message here...";
     els.bodyModeHint.textContent = "Sending as plain text";
-
-    // Reset toggles to default
+    els.htmlPreviewSection.style.display = "none";
+    els.htmlPreviewContainer.style.display = "none";
     sendMethod = "manual";
     els.recipientBtns.forEach(b => b.classList.remove("active"));
     els.recipientBtns[0].classList.add("active");
@@ -485,6 +480,7 @@
   async function loadConfig() {
     try {
       const res = await fetch("/api/config");
+      if (res.status === 401) { window.location.href = "/login.html"; return; }
       const data = await res.json();
       els.senderEmail.textContent = data.senderEmail || "Not configured";
     } catch {
@@ -492,129 +488,384 @@
     }
   }
 
-  // ── Load History ────────────────────────────────────────
-  async function loadHistory() {
+  // ── Load Batches (Sent History) ─────────────────────────
+  async function loadBatches(reset = true) {
+    if (isLoadingBatches || (!reset && !hasMoreBatches)) return;
+    isLoadingBatches = true;
+
+    if (reset) {
+      currentBatchCursor = null;
+      hasMoreBatches = true;
+      els.batchListContainer.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted);">Loading batches...</div>';
+      els.historyCount.textContent = "Loading...";
+    }
+
     try {
-      const res = await fetch("/api/emails");
+      let url = "/api/batches?limit=10";
+      if (currentBatchCursor) {
+        url += `&startAfter=${encodeURIComponent(currentBatchCursor)}`;
+      }
+
+      const res = await fetch(url);
+      if (res.status === 401) { window.location.href = "/login.html"; return; }
       const data = await res.json();
+      
+      isLoadingBatches = false;
 
-      emailCount = data.count || 0;
-      updateHistoryBadge();
-      els.historyCount.textContent = `${emailCount} email${emailCount !== 1 ? "s" : ""} sent`;
-
-      if (data.emails.length === 0) {
-        els.emailList.innerHTML = `
+      if (reset && (!data.success || !data.batches || data.batches.length === 0)) {
+        els.historyCount.textContent = "0 batches";
+        els.batchListContainer.innerHTML = `
           <div class="empty-state">
             <div class="empty-icon">📭</div>
-            <h3>No emails sent yet</h3>
-            <p>Compose and send your first email to see it here</p>
-          </div>
-        `;
+            <h3>No batches yet</h3>
+            <p>Send your first batch to see it here</p>
+          </div>`;
         return;
       }
 
-      els.emailList.innerHTML = `
-        <div class="email-list">
-          ${data.emails.map(renderEmailCard).join("")}
-        </div>
-      `;
+      if (reset) {
+        els.historyCount.textContent = "Batches";
+        els.batchListContainer.innerHTML = `<div class="batch-list"></div>`;
+      }
+
+      const listEl = els.batchListContainer.querySelector(".batch-list");
+      if (listEl && data.batches && data.batches.length > 0) {
+        listEl.insertAdjacentHTML("beforeend", data.batches.map(renderBatchCard).join(""));
+      }
+
+      if (data.hasMore) {
+        hasMoreBatches = true;
+        currentBatchCursor = data.lastCreatedAt;
+      } else {
+        hasMoreBatches = false;
+        if (!els.batchListContainer.querySelector(".end-of-list") && data.batches.length > 0) {
+          els.batchListContainer.insertAdjacentHTML(
+            "beforeend", 
+            `<div class="end-of-list" style="text-align:center; padding: 20px; color: var(--text-muted); font-size: 0.9rem;">No more batches to load</div>`
+          );
+        }
+      }
+
+      // Attach detail button listeners (only on unbound ones)
+      $$(".btn-batch-details").forEach(btn => {
+        if (!btn.dataset.bound) {
+          btn.addEventListener("click", () => openBatchDetail(btn.dataset.id));
+          btn.dataset.bound = "true";
+        }
+      });
     } catch {
-      els.emailList.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">⚠️</div>
-          <h3>Could not load history</h3>
-          <p>Unable to connect to the server</p>
-        </div>
-      `;
+      isLoadingBatches = false;
+      if (reset) {
+        els.batchListContainer.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">⚠️</div>
+            <h3>Could not load batches</h3>
+            <p>Unable to connect to the server</p>
+          </div>`;
+      }
     }
   }
 
-  function renderEmailCard(email) {
-    const date = new Date(email.sentAt);
-    const timeStr = date.toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  function renderBatchCard(batch) {
+    const date = batch.createdAt ? new Date(batch.createdAt).toLocaleString(undefined, {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+    }) : "—";
 
-    const statusClass = email.status === "sent" ? "sent" : "failed";
-    const statusIcon = email.status === "sent" ? "✅" : "❌";
-    const statusLabel = email.status === "sent" ? "Sent" : "Failed";
-
-    let bodyPreview = email.body || "";
-    // Strip HTML tags for preview
-    if (email.isHtml) {
-      bodyPreview = bodyPreview.replace(/<[^>]*>/g, "").trim();
-    }
-    if (bodyPreview.length > 140) {
-      bodyPreview = bodyPreview.substring(0, 140) + "...";
-    }
-
-    let attachmentsHtml = "";
-    if (email.attachmentNames && email.attachmentNames.length > 0) {
-      attachmentsHtml = `
-        <div class="email-card-attachments">
-          ${email.attachmentNames.map((name) => `<span class="email-card-attachment">📎 ${escapeHtml(name)}</span>`).join("")}
-        </div>
-      `;
-    }
-
-    let ccInfo = "";
-    if (email.cc) ccInfo += `<br><span style="color:var(--text-muted)">CC:</span> <span>${escapeHtml(email.cc)}</span>`;
-    if (email.bcc) ccInfo += `<br><span style="color:var(--text-muted)">BCC:</span> <span>${escapeHtml(email.bcc)}</span>`;
+    const statusClass = batch.status.toLowerCase();
+    const statusIcons = { processing: "⚡", paused: "⏸", completed: "✅" };
+    const statusIcon = statusIcons[statusClass] || "⚡";
 
     return `
-      <div class="email-card">
-        <div class="email-card-top">
+      <div class="batch-listing-card">
+        <div class="batch-listing-top">
           <div>
-            <div class="email-card-subject">${escapeHtml(email.subject)}</div>
-            <div class="email-card-to">
-              To: <span>${escapeHtml(email.to)}</span>${ccInfo}
-            </div>
+            <div class="batch-listing-subject">${escapeHtml(batch.subject)}</div>
+            <div class="batch-listing-date">${date}</div>
           </div>
-          <div class="email-card-meta">
-            <span class="email-card-time">${timeStr}</span>
-            <span class="email-card-status ${statusClass}">${statusIcon} ${statusLabel}</span>
+          <span class="batch-listing-status ${statusClass}">${statusIcon} ${batch.status}</span>
+        </div>
+        <div class="batch-listing-counters">
+          <div class="batch-counter">
+            <span class="batch-counter-value total">${batch.totalEmails}</span>
+            <span class="batch-counter-label">Total</span>
+          </div>
+          <div class="batch-counter">
+            <span class="batch-counter-value success">${batch.successCount}</span>
+            <span class="batch-counter-label">Sent</span>
+          </div>
+          <div class="batch-counter">
+            <span class="batch-counter-value bounce">${batch.bounceCount}</span>
+            <span class="batch-counter-label">Bounced</span>
+          </div>
+          <div class="batch-counter">
+            <span class="batch-counter-value pending">${batch.pendingCount}</span>
+            <span class="batch-counter-label">Pending</span>
           </div>
         </div>
-        <div class="email-card-body">${escapeHtml(bodyPreview)}</div>
-        ${attachmentsHtml}
-      </div>
-    `;
+        <div class="batch-listing-footer">
+          <div class="batch-listing-meta">
+            <span>📊 Limit: ${batch.dailyLimit ? batch.dailyLimit + '/day' : 'None'}</span>
+            <span>🔄 ${batch.sendMethod === 'database' ? 'Database' : 'Manual'}</span>
+          </div>
+          <button class="btn-batch-details" data-id="${batch.id}">📋 Details</button>
+        </div>
+      </div>`;
   }
 
-  function updateHistoryBadge() {
-    if (emailCount > 0) {
-      els.historyBadge.textContent = emailCount;
-      els.historyBadge.style.display = "inline";
-    } else {
-      els.historyBadge.style.display = "none";
+  // ── Batch Detail Modal ──────────────────────────────────
+  async function openBatchDetail(batchId) {
+    els.detailOverlay.style.display = "flex";
+    els.detailOverlay.innerHTML = `
+      <div class="detail-modal">
+        <div style="padding:60px;text-align:center;color:var(--text-muted);">Loading batch details...</div>
+      </div>`;
+
+    try {
+      const res = await fetch(`/api/batches/${batchId}/details`);
+      const data = await res.json();
+      if (!data.success) {
+        els.detailOverlay.innerHTML = `<div class="detail-modal"><div style="padding:40px;text-align:center;color:var(--accent-error-light);">Failed to load details</div></div>`;
+        return;
+      }
+
+      const b = data.batch;
+      const statusClass = b.status.toLowerCase();
+      const statusIcons = { processing: "⚡", paused: "⏸", completed: "✅" };
+
+      els.detailOverlay.innerHTML = `
+        <div class="detail-modal">
+          <div class="detail-modal-header">
+            <div>
+              <div class="detail-modal-title">${escapeHtml(b.subject)}</div>
+              <div class="detail-modal-subtitle">Created: ${b.createdAt ? new Date(b.createdAt).toLocaleString() : '—'} · <span class="batch-listing-status ${statusClass}">${statusIcons[statusClass] || '⚡'} ${b.status}</span></div>
+            </div>
+            <button class="btn-close-modal" id="btnCloseDetail">✕</button>
+          </div>
+          <div class="detail-modal-stats">
+            <div class="batch-counter"><span class="batch-counter-value total">${b.totalEmails}</span><span class="batch-counter-label">Total</span></div>
+            <div class="batch-counter"><span class="batch-counter-value success">${b.successCount}</span><span class="batch-counter-label">Sent</span></div>
+            <div class="batch-counter"><span class="batch-counter-value bounce">${b.bounceCount}</span><span class="batch-counter-label">Bounced</span></div>
+            <div class="batch-counter"><span class="batch-counter-value pending">${b.pendingCount}</span><span class="batch-counter-label">Pending</span></div>
+          </div>
+          <div class="detail-modal-body">
+            <div class="detail-tabs" id="detailTabs">
+              <button class="detail-tab active" data-filter="all">All <span class="tab-count">(${b.totalEmails})</span></button>
+              <button class="detail-tab" data-filter="sent">Sent <span class="tab-count">(${b.successCount})</span></button>
+              <button class="detail-tab" data-filter="bounced">Bounced <span class="tab-count">(${b.bounceCount})</span></button>
+              <button class="detail-tab" data-filter="pending">Pending <span class="tab-count">(${b.pendingCount})</span></button>
+            </div>
+            <div class="detail-email-list" id="detailEmailList">
+              ${renderDetailEmails(b.emailDetails, "all")}
+            </div>
+          </div>
+        </div>`;
+
+      // Close button
+      $("#btnCloseDetail").addEventListener("click", () => {
+        els.detailOverlay.style.display = "none";
+      });
+
+      // Tab switching
+      const emailDetails = b.emailDetails;
+      $$("#detailTabs .detail-tab").forEach(tab => {
+        tab.addEventListener("click", () => {
+          $$("#detailTabs .detail-tab").forEach(t => t.classList.remove("active"));
+          tab.classList.add("active");
+          $("#detailEmailList").innerHTML = renderDetailEmails(emailDetails, tab.dataset.filter);
+        });
+      });
+
+    } catch (err) {
+      els.detailOverlay.innerHTML = `<div class="detail-modal"><div style="padding:40px;text-align:center;color:var(--accent-error-light);">Error loading details</div></div>`;
     }
+
+    // Close on clicking overlay background
+    els.detailOverlay.addEventListener("click", (e) => {
+      if (e.target === els.detailOverlay) {
+        els.detailOverlay.style.display = "none";
+      }
+    });
+  }
+
+  function renderDetailEmails(emails, filter) {
+    const filtered = filter === "all" ? emails : emails.filter(e => e.status === filter);
+    if (filtered.length === 0) {
+      return `<div style="text-align:center;padding:32px;color:var(--text-muted);">No ${filter} emails</div>`;
+    }
+    return filtered.map((e, i) => `
+      <div class="detail-email-row">
+        <span style="font-size:0.72rem;color:var(--text-muted);min-width:30px;text-align:center;">${i + 1}</span>
+        <span class="email-addr">${escapeHtml(e.email)}</span>
+        <span class="email-badge ${e.status}">${e.status}</span>
+      </div>
+    `).join("");
+  }
+
+  // ── Provider Toggle ────────────────────────────────────
+  function setupProviderToggle() {
+    els.providerBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        els.providerBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedProvider = btn.dataset.provider;
+      });
+    });
+  }
+
+  // ── Analytics ─────────────────────────────────────────
+  function setupAnalyticsFilters() {
+    // Period filters
+    $$("[data-period]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        $$("[data-period]").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentPeriod = btn.dataset.period;
+        loadAnalytics();
+      });
+    });
+    // Provider filters (only ones inside analytics section)
+    $$(".analytics-filters [data-provider]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        btn.closest(".filter-group").querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentProviderFilter = btn.dataset.provider;
+        loadAnalytics();
+      });
+    });
+  }
+
+  async function loadAnalytics() {
+    try {
+      const res = await fetch(`/api/analytics?period=${currentPeriod}`);
+      if (res.status === 401) { window.location.href = "/login.html"; return; }
+      const data = await res.json();
+      if (!data.success) return;
+
+      // Update summary cards
+      const totals = data.totals || {};
+      els.statTotalEmails.textContent = (totals.sent || 0) + (totals.bounced || 0);
+      els.statTotalSent.textContent = totals.sent || 0;
+      els.statTotalBounced.textContent = totals.bounced || 0;
+      els.statGmailSent.textContent = totals.gmail_sent || 0;
+      els.statAwsSent.textContent = totals.aws_sent || 0;
+
+      // Build chart datasets based on provider filter
+      let sentData, bouncedData, sentLabel, bouncedLabel;
+      if (currentProviderFilter === "gmail") {
+        sentData = data.gmail_sent;
+        bouncedData = data.gmail_bounced;
+        sentLabel = "Gmail Sent";
+        bouncedLabel = "Gmail Bounced";
+      } else if (currentProviderFilter === "aws") {
+        sentData = data.aws_sent;
+        bouncedData = data.aws_bounced;
+        sentLabel = "AWS Sent";
+        bouncedLabel = "AWS Bounced";
+      } else {
+        sentData = data.sent;
+        bouncedData = data.bounced;
+        sentLabel = "Sent";
+        bouncedLabel = "Bounced";
+      }
+
+      renderAnalyticsChart(data.labels, sentData, bouncedData, sentLabel, bouncedLabel);
+    } catch (err) {
+      console.error("Failed to load analytics:", err);
+    }
+  }
+
+  function renderAnalyticsChart(labels, sentData, bouncedData, sentLabel, bouncedLabel) {
+    if (analyticsChartInstance) {
+      analyticsChartInstance.destroy();
+    }
+
+    const ctx = els.analyticsChart.getContext("2d");
+    analyticsChartInstance = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: sentLabel,
+            data: sentData,
+            backgroundColor: "rgba(16, 185, 129, 0.7)",
+            borderColor: "#10b981",
+            borderWidth: 1,
+            borderRadius: 4,
+          },
+          {
+            label: bouncedLabel,
+            data: bouncedData,
+            backgroundColor: "rgba(239, 68, 68, 0.7)",
+            borderColor: "#ef4444",
+            borderWidth: 1,
+            borderRadius: 4,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          intersect: false,
+          mode: "index",
+        },
+        plugins: {
+          legend: {
+            position: "top",
+            labels: {
+              font: { family: "Inter", size: 12, weight: 600 },
+              color: "#4b5563",
+              usePointStyle: true,
+              padding: 16,
+            },
+          },
+          tooltip: {
+            backgroundColor: "#ffffff",
+            titleColor: "#111827",
+            bodyColor: "#4b5563",
+            borderColor: "rgba(0,0,0,0.1)",
+            borderWidth: 1,
+            padding: 12,
+            titleFont: { family: "Inter", size: 13, weight: 700 },
+            bodyFont: { family: "Inter", size: 12 },
+            cornerRadius: 8,
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              font: { family: "Inter", size: 11 },
+              color: "#6b7280",
+              maxRotation: 45,
+            },
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: "rgba(0,0,0,0.04)" },
+            ticks: {
+              font: { family: "Inter", size: 11 },
+              color: "#6b7280",
+              stepSize: 1,
+            },
+          },
+        },
+      },
+    });
   }
 
   // ── Toast Notifications ─────────────────────────────────
   function showToast(message, type = "info") {
-    const icons = {
-      success: "✅",
-      error: "❌",
-      info: "ℹ️",
-    };
-
+    const icons = { success: "✅", error: "❌", info: "ℹ️" };
     const toast = document.createElement("div");
     toast.className = `toast ${type}`;
     toast.innerHTML = `
       <span class="toast-icon">${icons[type]}</span>
       <span>${escapeHtml(message)}</span>
-      <button class="toast-close" title="Close">&times;</button>
-    `;
-
+      <button class="toast-close" title="Close">&times;</button>`;
     els.toastContainer.appendChild(toast);
-
-    // Close button
     toast.querySelector(".toast-close").addEventListener("click", () => dismissToast(toast));
-
-    // Auto-dismiss
     setTimeout(() => dismissToast(toast), 5000);
   }
 
@@ -622,64 +873,6 @@
     if (toast.classList.contains("toast-out")) return;
     toast.classList.add("toast-out");
     toast.addEventListener("animationend", () => toast.remove());
-  }
-
-  // ─── Active Batches Sidebar Logic ─────────────────────────
-  async function fetchActiveBatches() {
-    try {
-      const res = await fetch("/api/active-batches");
-      const data = await res.json();
-      
-      if (data.success) {
-        renderActiveBatches(data.batches);
-      }
-    } catch (err) {
-      console.error("Error fetching active batches:", err);
-    }
-  }
-
-  function renderActiveBatches(batches) {
-    if (!activeBatchesList) return;
-    
-    if (batches.length === 0) {
-      activeBatchesList.innerHTML = '<div class="empty-state">No active batches</div>';
-      return;
-    }
-    
-    let html = '';
-    batches.forEach(batch => {
-      const isScheduled = batch.startTime && batch.startTime !== 'Immediate';
-      const progressPercent = batch.totalEmails > 0 
-        ? Math.min(100, Math.round((batch.progressIndex / batch.totalEmails) * 100))
-        : 0;
-        
-      html += `
-        <div class="batch-card">
-          <div class="batch-title" title="${batch.subject}">${batch.subject || 'No Subject'}</div>
-          
-          <div class="batch-stats">
-            <span>Progress</span>
-            <span>${batch.progressIndex} / ${batch.totalEmails}</span>
-          </div>
-          
-          <div class="batch-progress-bar">
-            <div class="batch-progress-fill" style="width: ${progressPercent}%"></div>
-          </div>
-          
-          <div class="batch-meta">
-            <span>Limit: ${batch.dailyLimit !== 'None' ? batch.dailyLimit + '/day' : 'None'}</span>
-            <span>${isScheduled ? 'Starts: ' + batch.startTime : 'Immediate'}</span>
-          </div>
-        </div>
-      `;
-    });
-    
-    activeBatchesList.innerHTML = html;
-  }
-
-  // Refresh manually
-  if (btnRefreshBatches) {
-    btnRefreshBatches.addEventListener("click", fetchActiveBatches);
   }
 
   // ── Utilities ───────────────────────────────────────────

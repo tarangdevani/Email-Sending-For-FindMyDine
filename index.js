@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const session = require("express-session");
 const nodemailer = require("nodemailer");
 const multer = require("multer");
 const path = require("path");
@@ -581,17 +582,84 @@ async function runScraper(firestorePath, forceRescrap = false) {
   }
 }
 
+// ─── Auth Credentials ─────────────────────────────────────
+const AUTH_EMAIL = "info.findmydine@gmail.com";
+const AUTH_PASSWORD = "FindMyDine$999";
+
 // ─── Middleware ────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(session({
+  secret: "findmydine-email-panel-secret-key-2026",
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+}));
+
+// Auth guard for HTML pages — BEFORE static files
+app.use((req, res, next) => {
+  // Allow static assets (CSS, JS, images, fonts) without auth
+  if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/)) {
+    return next();
+  }
+  // Allow login page
+  if (req.path === "/login.html") {
+    return next();
+  }
+  // Allow API routes (handled by separate auth middleware)
+  if (req.path.startsWith("/api/")) {
+    return next();
+  }
+  // Redirect unauthenticated users to login for page requests
+  if (!req.session || !req.session.authenticated) {
+    return res.redirect("/login.html");
+  }
+  next();
+});
 
 // Serve frontend static files
 app.use(express.static(path.join(__dirname, "public")));
 
-// Create reusable transporter
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || "smtp.zoho.in",
+// ─── Auth Middleware ──────────────────────────────────────
+function requireAuth(req, res, next) {
+  if (req.session && req.session.authenticated) {
+    return next();
+  }
+  // For API routes, return 401
+  if (req.path.startsWith("/api/")) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+  // For pages, redirect to login
+  return res.redirect("/login.html");
+}
+
+// ─── Auth Routes (public) ─────────────────────────────────
+app.post("/api/login", (req, res) => {
+  const { email, password } = req.body;
+  if (email === AUTH_EMAIL && password === AUTH_PASSWORD) {
+    req.session.authenticated = true;
+    req.session.user = email;
+    return res.json({ success: true, message: "Login successful" });
+  }
+  return res.status(401).json({ success: false, message: "Invalid email or password" });
+});
+
+app.post("/api/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.json({ success: true, message: "Logged out" });
+  });
+});
+
+// Protect all API routes (except login) and pages
+app.use("/api", (req, res, next) => {
+  if (req.path === "/login") return next();
+  return requireAuth(req, res, next);
+});
+
+// ─── Dual Email Transporters ─────────────────────────────
+const gmailTransporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST || "smtp.gmail.com",
   port: parseInt(process.env.EMAIL_PORT) || 465,
   secure: (parseInt(process.env.EMAIL_PORT) || 465) === 465,
   auth: {
@@ -599,6 +667,24 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS,
   },
 });
+
+const awsTransporter = nodemailer.createTransport({
+  host: process.env.AWS_EMAIL_HOST || "email-smtp.ap-south-1.amazonaws.com",
+  port: parseInt(process.env.AWS_EMAIL_PORT) || 587,
+  secure: (parseInt(process.env.AWS_EMAIL_PORT) || 587) === 465,
+  auth: {
+    user: process.env.AWS_EMAIL_USER,
+    pass: process.env.AWS_EMAIL_PASS,
+  },
+});
+
+// Keep backward compat: default transporter = gmail
+const transporter = gmailTransporter;
+
+function getTransporter(provider) {
+  if (provider === "aws") return { transporter: awsTransporter, from: `"FindMyDine" <${process.env.AWS_EMAIL_FROM || "info@findmydine.online"}>` };
+  return { transporter: gmailTransporter, from: `"FindMyDine" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>` };
+}
 
 // ─── Bulk Sending State ──────────────────────────────────
 let bulkEmailState = {
@@ -638,19 +724,22 @@ function addBulkLog(message, type = "info") {
 }
 
 // ─── Metrics tracking helper ──────────────────────────────────
-async function updateMetrics(firestore, status, isDatabaseMethod, firestorePath, email) {
+async function updateMetrics(firestore, status, isDatabaseMethod, firestorePath, email, provider) {
   if (!firestore) return;
   
   const today = new Date().toISOString().split("T")[0];
   const dailyRef = firestore.collection("email_metrics").doc(today);
   const overallRef = firestore.collection("email_metrics").doc("overall");
+  const prov = provider || "gmail"; // default to gmail for backward compat
 
   try {
     const incrementPayload = {};
     if (status === "sent") {
       incrementPayload.sent = admin.firestore.FieldValue.increment(1);
+      incrementPayload[`${prov}_sent`] = admin.firestore.FieldValue.increment(1);
     } else if (status === "failed") {
       incrementPayload.bounces = admin.firestore.FieldValue.increment(1);
+      incrementPayload[`${prov}_bounces`] = admin.firestore.FieldValue.increment(1);
     }
 
     // Update Daily
@@ -737,9 +826,9 @@ setInterval(async () => {
 
       if (canRunNow && !dailyLimitReached) {
          console.log(`Cron: Starting batch ${doc.id}`);
-         // Reconstruct mailOptions Base
+         const { transporter: batchTransporter, from: batchFrom } = getTransporter(batch.provider);
          const mailOptionsBase = {
-            from: `"FindMyDine" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
+            from: batchFrom,
             subject: batch.subject,
             text: batch.text || undefined,
             html: batch.html || undefined,
@@ -759,7 +848,7 @@ setInterval(async () => {
          }
 
          // Fire and forget, runBulkEmail will manage state
-         runBulkEmail(doc.id, batch.emails, mailOptionsBase, batch).catch(console.error);
+         runBulkEmail(doc.id, batch.emails, mailOptionsBase, batch, batchTransporter).catch(console.error);
       }
     }
   } catch (err) {
@@ -786,6 +875,69 @@ app.get("/api/server-time", (req, res) => {
     time: now.toLocaleTimeString("en-US", { hour12: false }),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   });
+});
+
+// ─── Analytics API ────────────────────────────────────────
+app.get("/api/analytics", async (req, res) => {
+  try {
+    const firestore = initFirebase();
+    const period = req.query.period || "day"; // day, month, year
+    const metricsRef = firestore.collection("email_metrics");
+
+    // Get all docs except "overall"
+    const snapshot = await metricsRef.get();
+    const rawData = {};
+
+    snapshot.forEach(doc => {
+      if (doc.id === "overall") return;
+      const data = doc.data();
+      // doc.id is date string like "2026-03-03"
+      let key;
+      if (period === "day") {
+        key = doc.id; // "2026-03-03"
+      } else if (period === "month") {
+        key = doc.id.substring(0, 7); // "2026-03"
+      } else if (period === "year") {
+        key = doc.id.substring(0, 4); // "2026"
+      } else {
+        key = doc.id;
+      }
+
+      if (!rawData[key]) {
+        rawData[key] = { sent: 0, bounces: 0, gmail_sent: 0, gmail_bounces: 0, aws_sent: 0, aws_bounces: 0 };
+      }
+      rawData[key].sent += data.sent || 0;
+      rawData[key].bounces += data.bounces || 0;
+      rawData[key].gmail_sent += data.gmail_sent || 0;
+      rawData[key].gmail_bounces += data.gmail_bounces || 0;
+      rawData[key].aws_sent += data.aws_sent || 0;
+      rawData[key].aws_bounces += data.aws_bounces || 0;
+    });
+
+    // Sort by key (date) and take last 30 entries
+    const sortedKeys = Object.keys(rawData).sort();
+    const recentKeys = sortedKeys.slice(-30);
+
+    const result = {
+      labels: recentKeys,
+      sent: recentKeys.map(k => rawData[k].sent),
+      bounced: recentKeys.map(k => rawData[k].bounces),
+      gmail_sent: recentKeys.map(k => rawData[k].gmail_sent),
+      gmail_bounced: recentKeys.map(k => rawData[k].gmail_bounces),
+      aws_sent: recentKeys.map(k => rawData[k].aws_sent),
+      aws_bounced: recentKeys.map(k => rawData[k].aws_bounces),
+      totals: {
+        sent: Object.values(rawData).reduce((s, d) => s + d.sent, 0),
+        bounced: Object.values(rawData).reduce((s, d) => s + d.bounces, 0),
+        gmail_sent: Object.values(rawData).reduce((s, d) => s + d.gmail_sent, 0),
+        aws_sent: Object.values(rawData).reduce((s, d) => s + d.aws_sent, 0),
+      },
+    };
+
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Failed to load analytics: " + err.message });
+  }
 });
 
 // Get sender config (for display in frontend)
@@ -899,7 +1051,7 @@ app.post("/api/send-email", upload.fields([{ name: "attachments", maxCount: 5 },
     });
     
     // Attempt tracking
-    updateMetrics(initFirebase(), "failed", false, null, to).catch(console.error);
+    updateMetrics(initFirebase(), "failed", false, null, to, "gmail").catch(console.error);
   }
 });
 
@@ -913,7 +1065,8 @@ app.post("/api/send-bulk", upload.fields([{ name: "attachments", maxCount: 5 }, 
     });
   }
 
-  let { sendMethod, firestorePath, manualEmails, subject, text, html, cc, bcc, replyTo, startTime, dailyLimit } = req.body;
+  let { sendMethod, firestorePath, manualEmails, subject, text, html, cc, bcc, replyTo, startTime, dailyLimit, provider } = req.body;
+  provider = provider || "gmail";
 
   // Extract HTML if uploaded as a file
   if (req.files && req.files['html'] && req.files['html'].length > 0) {
@@ -985,7 +1138,7 @@ app.post("/api/send-bulk", upload.fields([{ name: "attachments", maxCount: 5 }, 
   // Create Batch Record in Firestore
   const firestore = initFirebase();
   const batchRef = firestore.collection("email_batches").doc();
-  const batchData = {
+   const batchData = {
      subject: subject || "",
      text: text || "",
      html: html || "",
@@ -997,10 +1150,11 @@ app.post("/api/send-bulk", upload.fields([{ name: "attachments", maxCount: 5 }, 
      dailySentCount: 0,
      lastRunDate: new Date().toISOString().split("T")[0],
      sendMethod: sendMethod,
+     provider: provider,
      firestorePath: firestorePath || null,
      emails: emailList,
      progressIndex: 0,
-     status: "active", // active, completed
+     status: "active",
      createdAt: new Date().toISOString(),
      attachments: attachmentsList,
   };
@@ -1019,7 +1173,9 @@ app.post("/api/send-bulk", upload.fields([{ name: "attachments", maxCount: 5 }, 
   });
 });
 
-async function runBulkEmail(batchId, emails, mailOptionsBase, batchData) {
+async function runBulkEmail(batchId, emails, mailOptionsBase, batchData, customTransporter) {
+  const emailTransporter = customTransporter || transporter;
+  const batchProvider = batchData.provider || "gmail";
   resetBulkEmailState();
   bulkEmailState.isRunning = true;
   bulkEmailState.total = emails.length;
@@ -1049,7 +1205,7 @@ async function runBulkEmail(batchId, emails, mailOptionsBase, batchData) {
     let options;
     try {
       options = { ...mailOptionsBase, to: recipient };
-      const info = await transporter.sendMail(options);
+      const info = await emailTransporter.sendMail(options);
       bulkEmailState.sent++;
       batchData.dailySentCount++;
       addBulkLog(`✅ Sent to ${recipient}`, "success");
@@ -1070,10 +1226,16 @@ async function runBulkEmail(batchId, emails, mailOptionsBase, batchData) {
         status: "sent",
       });
       
-      await updateMetrics(firestore, "sent", batchData.sendMethod === "database", batchData.firestorePath, recipient);
+      await updateMetrics(firestore, "sent", batchData.sendMethod === "database", batchData.firestorePath, recipient, batchProvider);
+
+      // Track per-email status in batch document
+      await batchRef.update({
+        sentEmails: admin.firestore.FieldValue.arrayUnion(recipient)
+      });
 
     } catch (err) {
       bulkEmailState.errors++;
+      batchData.dailySentCount++; // Count bounced emails toward daily limit
       addBulkLog(`❌ Failed to send to ${recipient}: ${err.message}`, "error");
       
       emailHistory.push({
@@ -1091,7 +1253,12 @@ async function runBulkEmail(batchId, emails, mailOptionsBase, batchData) {
         error: err.message,
       });
 
-      await updateMetrics(firestore, "failed", batchData.sendMethod === "database", batchData.firestorePath, recipient);
+      await updateMetrics(firestore, "failed", batchData.sendMethod === "database", batchData.firestorePath, recipient, batchProvider);
+
+      // Track per-email status in batch document
+      await batchRef.update({
+        bouncedEmails: admin.firestore.FieldValue.arrayUnion(recipient)
+      });
     }
 
     // Save progress mapping to Firestore (using a slim update so we don't send huge base64 data back and forth)
@@ -1155,6 +1322,130 @@ app.get("/api/active-batches", async (req, res) => {
   } catch (error) {
     console.error("Error fetching active batches:", error);
     res.status(500).json({ success: false, message: "Failed to fetch active batches", error: error.message });
+  }
+});
+
+// ─── All Batches (for Sent History) ──────────────────────────
+app.get("/api/batches", async (req, res) => {
+  try {
+    const firestore = initFirebase();
+    const limit = parseInt(req.query.limit) || 10;
+    const startAfter = req.query.startAfter || null;
+
+    let query = firestore.collection("email_batches")
+      .orderBy("createdAt", "desc");
+
+    // Cursor-based pagination: start after the given createdAt value
+    if (startAfter) {
+      query = query.startAfter(startAfter);
+    }
+
+    query = query.limit(limit);
+    const snapshot = await query.get();
+
+    const batches = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const totalEmails = data.emails ? data.emails.length : 0;
+      const sentArr = data.sentEmails || [];
+      const bouncedArr = data.bouncedEmails || [];
+      const successCount = sentArr.length;
+      const bounceCount = bouncedArr.length;
+      const pendingCount = Math.max(0, totalEmails - successCount - bounceCount);
+      
+      // Determine status label
+      let statusLabel = "Processing";
+      if (data.status === "completed") {
+        statusLabel = "Completed";
+      } else if (data.dailyLimit && data.dailySentCount >= data.dailyLimit) {
+        statusLabel = "Paused";
+      } else if (data.status === "active" && !bulkEmailState.isRunning) {
+        statusLabel = "Paused";
+      }
+      
+      batches.push({
+        id: doc.id,
+        subject: data.subject || "(No Subject)",
+        totalEmails,
+        successCount,
+        bounceCount,
+        pendingCount,
+        status: statusLabel,
+        progressIndex: data.progressIndex || 0,
+        dailyLimit: data.dailyLimit || null,
+        dailySentCount: data.dailySentCount || 0,
+        startTime: data.startTime || null,
+        createdAt: data.createdAt,
+        sendMethod: data.sendMethod || "manual",
+        provider: data.provider || "gmail",
+        firestorePath: data.firestorePath || null,
+      });
+    });
+
+    const hasMore = batches.length === limit;
+    const lastCreatedAt = batches.length > 0 ? batches[batches.length - 1].createdAt : null;
+    
+    res.json({ success: true, batches, hasMore, lastCreatedAt });
+  } catch (error) {
+    console.error("Error fetching batches:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch batches", error: error.message });
+  }
+});
+
+// ─── Batch Detail ────────────────────────────────────────────
+app.get("/api/batches/:id/details", async (req, res) => {
+  try {
+    const firestore = initFirebase();
+    const docRef = firestore.collection("email_batches").doc(req.params.id);
+    const doc = await docRef.get();
+    
+    if (!doc.exists) {
+      return res.status(404).json({ success: false, message: "Batch not found" });
+    }
+    
+    const data = doc.data();
+    const allEmails = data.emails || [];
+    const sentArr = data.sentEmails || [];
+    const bouncedArr = data.bouncedEmails || [];
+    const sentSet = new Set(sentArr);
+    const bouncedSet = new Set(bouncedArr);
+    
+    // Build per-email status
+    const emailDetails = allEmails.map(email => {
+      if (sentSet.has(email)) return { email, status: "sent" };
+      if (bouncedSet.has(email)) return { email, status: "bounced" };
+      return { email, status: "pending" };
+    });
+    
+    let statusLabel = "Processing";
+    if (data.status === "completed") statusLabel = "Completed";
+    else if (data.dailyLimit && data.dailySentCount >= data.dailyLimit) statusLabel = "Paused";
+    else if (data.status === "active" && !bulkEmailState.isRunning) statusLabel = "Paused";
+    
+    res.json({
+      success: true,
+      batch: {
+        id: doc.id,
+        subject: data.subject || "(No Subject)",
+        html: data.html || "",
+        text: data.text || "",
+        status: statusLabel,
+        totalEmails: allEmails.length,
+        successCount: sentArr.length,
+        bounceCount: bouncedArr.length,
+        pendingCount: Math.max(0, allEmails.length - sentArr.length - bouncedArr.length),
+        dailyLimit: data.dailyLimit || null,
+        dailySentCount: data.dailySentCount || 0,
+        startTime: data.startTime || null,
+        createdAt: data.createdAt,
+        sendMethod: data.sendMethod || "manual",
+        firestorePath: data.firestorePath || null,
+        emailDetails,
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching batch details:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch batch details", error: error.message });
   }
 });
 
@@ -1467,8 +1758,24 @@ app.get("/api/scraper/download-emails", (req, res) => {
   res.download(filePath, fileName);
 });
 
-// Fallback — serve index.html for SPA
+// ─── Protected page routes ────────────────────────────────
+app.get("/", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+app.get("/scraper.html", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "scraper.html"));
+});
+
+// Fallback — serve index.html for SPA (protected)
 app.get("/*splat", (req, res) => {
+  // Allow login page and static assets without auth
+  if (req.path === "/login.html" || req.path.endsWith(".css") || req.path.endsWith(".js")) {
+    return res.sendFile(path.join(__dirname, "public", req.path));
+  }
+  if (!req.session || !req.session.authenticated) {
+    return res.redirect("/login.html");
+  }
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 

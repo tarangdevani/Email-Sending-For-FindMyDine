@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="FindMyDine Email Panel — Login">
+  <title>FindMyDine — Login</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+</head>
+<body>
+
+  <!-- Animated Background Orbs -->
+  <div class="bg-effects">
+    <div class="bg-orb bg-orb-1"></div>
+    <div class="bg-orb bg-orb-2"></div>
+    <div class="bg-orb bg-orb-3"></div>
+  </div>
+
+  <div class="login-page">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-brand">FindMyDine<span class="brand-dot">.</span></div>
+        <p class="login-subtitle">Email Campaign Manager</p>
+      </div>
+
+      <form id="loginForm" class="login-form">
+        <div class="login-field">
+          <label for="loginEmail">Email Address</label>
+          <input type="email" id="loginEmail" placeholder="Enter your email" required autocomplete="email">
+        </div>
+        <div class="login-field">
+          <label for="loginPassword">Password</label>
+          <input type="password" id="loginPassword" placeholder="Enter your password" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="login-btn" id="loginBtn">
+          <span class="login-btn-text">Sign In</span>
+          <span class="login-btn-spinner" style="display:none;"></span>
+        </button>
+        <div class="login-error" id="loginError" style="display:none;"></div>
+      </form>
+
+      <div class="login-footer">
+        <span>🔒 Secure access — Authorized users only</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/login.js"></script>
+</body>
+</html>

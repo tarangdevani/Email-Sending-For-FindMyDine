@@ -4,9 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="A beautiful, modern email sending application. Compose and send emails with attachments, CC/BCC support, and track your sent history.">
-  <title>Email Send — Compose & Send Emails</title>
+  <title>FindMyDine — Email Campaign Manager</title>
   <link rel="stylesheet" href="/styles.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✉️</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -23,8 +24,8 @@
     <header class="header">
       <div class="header-inner">
         <a href="/" class="logo">
-          <div class="logo-icon">✉️</div>
-          <span class="logo-text">Email Send</span>
+          <div class="logo-icon">🍽️</div>
+          <span class="logo-text">FindMyDine<span style="color:#fbbf24">.</span></span>
         </a>
         <div class="header-status">
           <span class="status-dot"></span>
@@ -32,9 +33,63 @@
         </div>
         <div class="header-nav">
           <a href="/scraper.html" class="header-link">🔍 Email Scraper</a>
+          <button class="btn-logout" id="btnLogout">🚪 Logout</button>
         </div>
       </div>
     </header>
+
+    <!-- ═══ Analytics Dashboard ═══ -->
+    <section class="analytics-dashboard" id="analyticsDashboard">
+      <div class="analytics-summary">
+        <div class="analytics-card analytics-card-total">
+          <div class="analytics-card-icon">📧</div>
+          <div class="analytics-card-value" id="statTotalEmails">0</div>
+          <div class="analytics-card-label">Total Emails</div>
+        </div>
+        <div class="analytics-card analytics-card-sent">
+          <div class="analytics-card-icon">✅</div>
+          <div class="analytics-card-value" id="statTotalSent">0</div>
+          <div class="analytics-card-label">Successful</div>
+        </div>
+        <div class="analytics-card analytics-card-bounced">
+          <div class="analytics-card-icon">❌</div>
+          <div class="analytics-card-value" id="statTotalBounced">0</div>
+          <div class="analytics-card-label">Bounced</div>
+        </div>
+        <div class="analytics-card analytics-card-gmail">
+          <div class="analytics-card-icon">📨</div>
+          <div class="analytics-card-value" id="statGmailSent">0</div>
+          <div class="analytics-card-label">Gmail Sent</div>
+        </div>
+        <div class="analytics-card analytics-card-aws">
+          <div class="analytics-card-icon">☁️</div>
+          <div class="analytics-card-value" id="statAwsSent">0</div>
+          <div class="analytics-card-label">AWS Sent</div>
+        </div>
+      </div>
+      <div class="analytics-chart-wrapper">
+        <div class="analytics-chart-header">
+          <h3>📊 Email Analytics</h3>
+          <div class="analytics-filters">
+            <div class="filter-group">
+              <span class="filter-label">Period:</span>
+              <button class="filter-btn active" data-period="day">Day</button>
+              <button class="filter-btn" data-period="month">Month</button>
+              <button class="filter-btn" data-period="year">Year</button>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">Provider:</span>
+              <button class="filter-btn active" data-provider="all">All</button>
+              <button class="filter-btn" data-provider="gmail">Gmail</button>
+              <button class="filter-btn" data-provider="aws">AWS</button>
+            </div>
+          </div>
+        </div>
+        <div class="analytics-chart-container">
+          <canvas id="analyticsChart"></canvas>
+        </div>
+      </div>
+    </section>
 
     <!-- ═══ Tab Navigation ═══ -->
     <nav class="nav-tabs">
@@ -176,6 +231,21 @@
               </div>
             </div>
 
+            <!-- Send Via Provider Toggle -->
+            <div class="form-group full-width">
+              <label class="form-label">📡 Send via</label>
+              <div class="provider-toggle">
+                <button type="button" class="provider-btn active" data-provider="gmail">
+                  <span class="provider-icon">📨</span>
+                  <span>Gmail</span>
+                </button>
+                <button type="button" class="provider-btn" data-provider="aws">
+                  <span class="provider-icon">☁️</span>
+                  <span>AWS SES</span>
+                </button>
+              </div>
+            </div>
+
             <!-- Subject -->
             <div class="form-group full-width">
               <label class="form-label" for="emailSubject">
@@ -208,6 +278,12 @@
                 required
               ></textarea>
               <span class="form-help" id="bodyModeHint">Sending as plain text</span>
+              <div class="html-preview-section" id="htmlPreviewSection" style="display:none;">
+                <button type="button" class="btn-preview-html" id="btnPreviewHtml">👁 Preview Email</button>
+                <div class="html-preview-container" id="htmlPreviewContainer" style="display:none;">
+                  <iframe id="htmlPreviewFrame" sandbox="allow-same-origin"></iframe>
+                </div>
+              </div>
             </div>
 
             <!-- Attachments -->
@@ -239,17 +315,7 @@
             </div>
           </form>
 
-          <!-- Active Batches Sidebar -->
-          <div class="active-batches-container">
-            <div class="active-batches-header">
-              <h3>🔄 Active Batches</h3>
-              <button class="btn-refresh" id="btnRefreshBatches" title="Refresh">↻</button>
-            </div>
-            <div class="active-batches-list" id="activeBatchesList">
-              <div class="empty-state">No active batches</div>
-              <!-- Batches injected by JS -->
-            </div>
-          </div>
+
         </div>
       </section>
 
@@ -258,13 +324,13 @@
         <div class="history-panel">
           <div class="history-header">
             <h2>📋 Sent History</h2>
-            <span class="history-count" id="historyCount">0 emails sent</span>
+            <span class="history-count" id="historyCount">0 batches</span>
           </div>
-          <div id="emailList">
+          <div id="batchListContainer">
             <div class="empty-state">
               <div class="empty-icon">📭</div>
-              <h3>No emails sent yet</h3>
-              <p>Compose and send your first email to see it here</p>
+              <h3>No batches yet</h3>
+              <p>Send your first batch to see it here</p>
             </div>
           </div>
         </div>
@@ -274,7 +340,7 @@
 
     <!-- ═══ Footer ═══ -->
     <footer class="footer">
-      Email Send &copy; 2026 — Built with ❤️ using Express &amp; Nodemailer
+      FindMyDine &copy; 2026 — Email Campaign Manager
     </footer>
 
   </div>
@@ -324,6 +390,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Batch Detail Modal Overlay -->
+  <div class="detail-overlay" id="detailOverlay" style="display:none;"></div>
 
   <!-- Toast Container -->
   <div class="toast-container" id="toastContainer"></div>
