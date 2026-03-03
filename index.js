@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const session = require("express-session");
+const session = require("cookie-session");
 const nodemailer = require("nodemailer");
 const multer = require("multer");
 const path = require("path");
@@ -591,10 +591,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  secret: "findmydine-email-panel-secret-key-2026",
-  resave: false,
-  saveUninitialized: false,
-  cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+  name: "session",
+  keys: ["findmydine-email-panel-secret-key-2026"],
+  maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
 }));
 
 // Auth guard for HTML pages — BEFORE static files
@@ -646,9 +645,8 @@ app.post("/api/login", (req, res) => {
 });
 
 app.post("/api/logout", (req, res) => {
-  req.session.destroy(() => {
-    res.json({ success: true, message: "Logged out" });
-  });
+  req.session = null;
+  res.json({ success: true, message: "Logged out" });
 });
 
 // Protect all API routes (except login) and pages
