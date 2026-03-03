@@ -991,8 +991,8 @@ app.post("/api/send-email", upload.fields([{ name: "attachments", maxCount: 5 },
       from: `"FindMyDine" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
       to,
       subject,
-      text: text || undefined,
-      html: html || undefined,
+      text: text ? text.replace(/\{\{recipient_email\}\}/g, to) : undefined,
+      html: html ? html.replace(/\{\{recipient_email\}\}/g, to) : undefined,
     };
 
     if (cc) mailOptions.cc = cc;
@@ -1205,6 +1205,15 @@ async function runBulkEmail(batchId, emails, mailOptionsBase, batchData, customT
     let options;
     try {
       options = { ...mailOptionsBase, to: recipient };
+      
+      // Replace placeholders in the email body
+      if (options.text) {
+        options.text = options.text.replace(/\{\{recipient_email\}\}/g, recipient);
+      }
+      if (options.html) {
+        options.html = options.html.replace(/\{\{recipient_email\}\}/g, recipient);
+      }
+      
       const info = await emailTransporter.sendMail(options);
       bulkEmailState.sent++;
       batchData.dailySentCount++;
