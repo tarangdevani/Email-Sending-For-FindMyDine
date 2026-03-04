@@ -772,26 +772,17 @@ async function updateMetrics(firestore, status, isDatabaseMethod, firestorePath,
   }
 }
 
-// ─── Vercel Cron Endpoint ───────────────────────────────
-app.get("/api/cron", async (req, res) => {
-  // Optional security check
-  if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).json({ success: false, message: "Unauthorized" });
-  }
+// ─── Batch Scheduler (Cron) ───────────────────────────────
+const CRON_INTERVAL_MS = 60 * 1000; // Check every 60 seconds
 
-  if (!firebaseInitialized) {
-    return res.status(503).json({ success: false, message: "Firebase not initialized" });
-  }
-
+setInterval(async () => {
+  if (!firebaseInitialized) return;
   const firestore = db;
 
   try {
     const batchesRef = firestore.collection("email_batches");
     const snapshot = await batchesRef.where("status", "==", "active").get();
-    
-    if (snapshot.empty) {
-      return res.status(200).json({ success: true, message: "No active batches" });
-    }
+    if (snapshot.empty) return;
 
     for (const doc of snapshot.docs) {
       if (bulkEmailState.isRunning) {
@@ -858,13 +849,10 @@ app.get("/api/cron", async (req, res) => {
          runBulkEmail(doc.id, batch.emails, mailOptionsBase, batch, batchTransporter).catch(console.error);
       }
     }
-    
-    return res.status(200).json({ success: true, message: "Cron jobs checked and initiated" });
   } catch (err) {
     console.error("Cron Error:", err);
-    return res.status(500).json({ success: false, message: "Cron internal error", error: err.message });
   }
-});
+}, CRON_INTERVAL_MS);
 
 
 // ─── Email API Routes ─────────────────────────────────────
