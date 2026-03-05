@@ -66,6 +66,11 @@
           <div class="analytics-card-value" id="statAwsSent">0</div>
           <div class="analytics-card-label">AWS Sent</div>
         </div>
+        <div class="analytics-card analytics-card-brevo">
+          <div class="analytics-card-icon">💌</div>
+          <div class="analytics-card-value" id="statBrevoSent">0</div>
+          <div class="analytics-card-label">Brevo Sent</div>
+        </div>
       </div>
       <div class="analytics-chart-wrapper">
         <div class="analytics-chart-header">
@@ -82,6 +87,7 @@
               <button class="filter-btn active" data-provider="all">All</button>
               <button class="filter-btn" data-provider="gmail">Gmail</button>
               <button class="filter-btn" data-provider="aws">AWS</button>
+              <button class="filter-btn" data-provider="brevo">Brevo</button>
             </div>
           </div>
         </div>
@@ -242,6 +248,10 @@
                 <button type="button" class="provider-btn" data-provider="aws">
                   <span class="provider-icon">☁️</span>
                   <span>AWS SES</span>
+                </button>
+                <button type="button" class="provider-btn" data-provider="brevo">
+                  <span class="provider-icon">💌</span>
+                  <span>Brevo</span>
                 </button>
               </div>
             </div>

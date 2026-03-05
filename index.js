@@ -676,11 +676,22 @@ const awsTransporter = nodemailer.createTransport({
   },
 });
 
+const brevoTransporter = nodemailer.createTransport({
+  host: process.env.BREVO_EMAIL_HOST || "smtp-relay.brevo.com",
+  port: parseInt(process.env.BREVO_EMAIL_PORT) || 587,
+  secure: (parseInt(process.env.BREVO_EMAIL_PORT) || 587) === 465,
+  auth: {
+    user: process.env.BREVO_EMAIL_USER,
+    pass: process.env.BREVO_EMAIL_PASS,
+  },
+});
+
 // Keep backward compat: default transporter = gmail
 const transporter = gmailTransporter;
 
 function getTransporter(provider) {
   if (provider === "aws") return { transporter: awsTransporter, from: `"FindMyDine" <${process.env.AWS_EMAIL_FROM || "info@findmydine.online"}>` };
+  if (provider === "brevo") return { transporter: brevoTransporter, from: `"FindMyDine" <${process.env.BREVO_EMAIL_FROM || process.env.BREVO_EMAIL_USER}>` };
   return { transporter: gmailTransporter, from: `"FindMyDine" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>` };
 }
 
@@ -902,7 +913,7 @@ app.get("/api/analytics", async (req, res) => {
       }
 
       if (!rawData[key]) {
-        rawData[key] = { sent: 0, bounces: 0, gmail_sent: 0, gmail_bounces: 0, aws_sent: 0, aws_bounces: 0 };
+        rawData[key] = { sent: 0, bounces: 0, gmail_sent: 0, gmail_bounces: 0, aws_sent: 0, aws_bounces: 0, brevo_sent: 0, brevo_bounces: 0 };
       }
       rawData[key].sent += data.sent || 0;
       rawData[key].bounces += data.bounces || 0;
@@ -910,6 +921,8 @@ app.get("/api/analytics", async (req, res) => {
       rawData[key].gmail_bounces += data.gmail_bounces || 0;
       rawData[key].aws_sent += data.aws_sent || 0;
       rawData[key].aws_bounces += data.aws_bounces || 0;
+      rawData[key].brevo_sent += data.brevo_sent || 0;
+      rawData[key].brevo_bounces += data.brevo_bounces || 0;
     });
 
     // Sort by key (date) and take last 30 entries
@@ -924,11 +937,14 @@ app.get("/api/analytics", async (req, res) => {
       gmail_bounced: recentKeys.map(k => rawData[k].gmail_bounces),
       aws_sent: recentKeys.map(k => rawData[k].aws_sent),
       aws_bounced: recentKeys.map(k => rawData[k].aws_bounces),
+      brevo_sent: recentKeys.map(k => rawData[k].brevo_sent),
+      brevo_bounced: recentKeys.map(k => rawData[k].brevo_bounces),
       totals: {
         sent: Object.values(rawData).reduce((s, d) => s + d.sent, 0),
         bounced: Object.values(rawData).reduce((s, d) => s + d.bounces, 0),
         gmail_sent: Object.values(rawData).reduce((s, d) => s + d.gmail_sent, 0),
         aws_sent: Object.values(rawData).reduce((s, d) => s + d.aws_sent, 0),
+        brevo_sent: Object.values(rawData).reduce((s, d) => s + d.brevo_sent, 0),
       },
     };
 

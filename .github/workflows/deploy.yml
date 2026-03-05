@@ -1,0 +1,36 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2 Virtual Machine
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: GITHUB_TOKEN
+          script: |
+            cd ~/business-mail
+            
+            if [ ! -d ".git" ]; then
+              echo "Git repository not found. Please clone the repository manually on the server once."
+              exit 1
+            fi
+            
+            # Authenticate git with the temporary GitHub action token
+            git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
+            
+            # Make sure the deploy script is executable and run it
+            chmod +x deploy.sh
+            ./deploy.sh

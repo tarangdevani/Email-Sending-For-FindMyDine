@@ -87,6 +87,7 @@
     statTotalBounced: $("#statTotalBounced"),
     statGmailSent: $("#statGmailSent"),
     statAwsSent: $("#statAwsSent"),
+    statBrevoSent: $("#statBrevoSent"),
     analyticsChart: $("#analyticsChart"),
 
     // Toast
@@ -748,6 +749,7 @@
       els.statTotalBounced.textContent = totals.bounced || 0;
       els.statGmailSent.textContent = totals.gmail_sent || 0;
       els.statAwsSent.textContent = totals.aws_sent || 0;
+      els.statBrevoSent.textContent = totals.brevo_sent || 0;
 
       // Build chart datasets based on provider filter
       let sentData, bouncedData, sentLabel, bouncedLabel;
@@ -761,6 +763,11 @@
         bouncedData = data.aws_bounced;
         sentLabel = "AWS Sent";
         bouncedLabel = "AWS Bounced";
+      } else if (currentProviderFilter === "brevo") {
+        sentData = data.brevo_sent;
+        bouncedData = data.brevo_bounced;
+        sentLabel = "Brevo Sent";
+        bouncedLabel = "Brevo Bounced";
       } else {
         sentData = data.sent;
         bouncedData = data.bounced;
