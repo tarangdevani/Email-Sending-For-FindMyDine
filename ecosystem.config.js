@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name: 'business-mail',
+    name: 'email-send',
     script: 'server.js',
     instances: 1,
     autorestart: true,
