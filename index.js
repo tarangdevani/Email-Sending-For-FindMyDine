@@ -655,7 +655,7 @@ app.use("/api", (req, res, next) => {
   return requireAuth(req, res, next);
 });
 
-// ─── Dual Email Transporters ─────────────────────────────
+// ─── Email Transporters ───────────────────────────────────
 const gmailTransporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || "smtp.gmail.com",
   port: parseInt(process.env.EMAIL_PORT) || 465,
@@ -686,12 +686,36 @@ const brevoTransporter = nodemailer.createTransport({
   },
 });
 
+const zohoTransporter = nodemailer.createTransport({
+  host: process.env.ZOHO_EMAIL_HOST || "smtp.zoho.in",
+  port: parseInt(process.env.ZOHO_EMAIL_PORT) || 465,
+  secure: (parseInt(process.env.ZOHO_EMAIL_PORT) || 465) === 465,
+  auth: {
+    user: process.env.ZOHO_EMAIL_USER,
+    pass: process.env.ZOHO_EMAIL_PASS,
+  },
+});
+
+// ZeptoMail uses SMTP relay; ZEPTO_EMAIL_USER should be "emailapikey"
+// and ZEPTO_EMAIL_PASS should be the API key from ZeptoMail dashboard
+const zeptoTransporter = nodemailer.createTransport({
+  host: process.env.ZEPTO_EMAIL_HOST || "smtp.zeptomail.in",
+  port: parseInt(process.env.ZEPTO_EMAIL_PORT) || 587,
+  secure: (parseInt(process.env.ZEPTO_EMAIL_PORT) || 587) === 465,
+  auth: {
+    user: process.env.ZEPTO_EMAIL_USER || "emailapikey",
+    pass: process.env.ZEPTO_EMAIL_PASS,
+  },
+});
+
 // Keep backward compat: default transporter = gmail
 const transporter = gmailTransporter;
 
 function getTransporter(provider) {
   if (provider === "aws") return { transporter: awsTransporter, from: `"FindMyDine" <${process.env.AWS_EMAIL_FROM || "info@findmydine.online"}>` };
   if (provider === "brevo") return { transporter: brevoTransporter, from: `"FindMyDine" <${process.env.BREVO_EMAIL_FROM || process.env.BREVO_EMAIL_USER}>` };
+  if (provider === "zoho") return { transporter: zohoTransporter, from: `"FindMyDine" <${process.env.ZOHO_EMAIL_FROM || process.env.ZOHO_EMAIL_USER}>` };
+  if (provider === "zepto") return { transporter: zeptoTransporter, from: `"FindMyDine" <${process.env.ZEPTO_EMAIL_FROM || process.env.ZEPTO_EMAIL_USER}>` };
   return { transporter: gmailTransporter, from: `"FindMyDine" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>` };
 }
 
@@ -915,7 +939,7 @@ app.get("/api/analytics", async (req, res) => {
       }
 
       if (!rawData[key]) {
-        rawData[key] = { sent: 0, bounces: 0, gmail_sent: 0, gmail_bounces: 0, aws_sent: 0, aws_bounces: 0, brevo_sent: 0, brevo_bounces: 0 };
+        rawData[key] = { sent: 0, bounces: 0, gmail_sent: 0, gmail_bounces: 0, aws_sent: 0, aws_bounces: 0, brevo_sent: 0, brevo_bounces: 0, zoho_sent: 0, zoho_bounces: 0, zepto_sent: 0, zepto_bounces: 0 };
       }
       rawData[key].sent += data.sent || 0;
       rawData[key].bounces += data.bounces || 0;
@@ -925,6 +949,10 @@ app.get("/api/analytics", async (req, res) => {
       rawData[key].aws_bounces += data.aws_bounces || 0;
       rawData[key].brevo_sent += data.brevo_sent || 0;
       rawData[key].brevo_bounces += data.brevo_bounces || 0;
+      rawData[key].zoho_sent += data.zoho_sent || 0;
+      rawData[key].zoho_bounces += data.zoho_bounces || 0;
+      rawData[key].zepto_sent += data.zepto_sent || 0;
+      rawData[key].zepto_bounces += data.zepto_bounces || 0;
     });
 
     // Sort by key (date) and take last 30 entries
@@ -941,12 +969,18 @@ app.get("/api/analytics", async (req, res) => {
       aws_bounced: recentKeys.map(k => rawData[k].aws_bounces),
       brevo_sent: recentKeys.map(k => rawData[k].brevo_sent),
       brevo_bounced: recentKeys.map(k => rawData[k].brevo_bounces),
+      zoho_sent: recentKeys.map(k => rawData[k].zoho_sent),
+      zoho_bounced: recentKeys.map(k => rawData[k].zoho_bounces),
+      zepto_sent: recentKeys.map(k => rawData[k].zepto_sent),
+      zepto_bounced: recentKeys.map(k => rawData[k].zepto_bounces),
       totals: {
         sent: Object.values(rawData).reduce((s, d) => s + d.sent, 0),
         bounced: Object.values(rawData).reduce((s, d) => s + d.bounces, 0),
         gmail_sent: Object.values(rawData).reduce((s, d) => s + d.gmail_sent, 0),
         aws_sent: Object.values(rawData).reduce((s, d) => s + d.aws_sent, 0),
         brevo_sent: Object.values(rawData).reduce((s, d) => s + d.brevo_sent, 0),
+        zoho_sent: Object.values(rawData).reduce((s, d) => s + d.zoho_sent, 0),
+        zepto_sent: Object.values(rawData).reduce((s, d) => s + d.zepto_sent, 0),
       },
     };
 
@@ -1518,15 +1552,21 @@ app.post("/api/batches/:id/resume", async (req, res) => {
       return res.status(400).json({ success: false, message: "Cannot resume a completed batch" });
     }
 
-    // Set status back to active so the cron picks it up within 60 seconds
-    // Also reset dailySentCount so today's limit resets fresh on resume
-    await docRef.update({
-      status: "active",
-      dailySentCount: 0,
-      lastRunDate: new Date().toISOString().split("T")[0],
-    });
+    // IMPORTANT: Only set status back to "active".
+    // Do NOT touch dailySentCount or lastRunDate — the cron will handle them:
+    //   - It resets dailySentCount automatically when a new day starts (lastRunDate check)
+    //   - It checks startTime before running (e.g. waits until 5 PM if configured)
+    //   - It checks dailyLimit against dailySentCount as normal
+    // Resetting these fields here would bypass the time/limit checks and cause the
+    // batch to start immediately — which is the wrong behavior.
+    await docRef.update({ status: "active" });
 
-    res.json({ success: true, message: "Batch resumed. Will continue within 60 seconds." });
+    const batchData = doc.data();
+    const resumeMsg = batchData.startTime
+      ? `Batch resumed. Will run at next scheduled time (${batchData.startTime} server time).`
+      : "Batch resumed. Will continue at next cron tick (within 60 seconds).";
+
+    res.json({ success: true, message: resumeMsg });
   } catch (error) {
     console.error("Error resuming batch:", error);
     res.status(500).json({ success: false, message: "Failed to resume batch", error: error.message });

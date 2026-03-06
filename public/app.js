@@ -88,6 +88,8 @@
     statGmailSent: $("#statGmailSent"),
     statAwsSent: $("#statAwsSent"),
     statBrevoSent: $("#statBrevoSent"),
+    statZohoSent: $("#statZohoSent"),
+    statZeptoSent: $("#statZeptoSent"),
     analyticsChart: $("#analyticsChart"),
 
     // Toast
@@ -812,6 +814,8 @@
       els.statGmailSent.textContent = totals.gmail_sent || 0;
       els.statAwsSent.textContent = totals.aws_sent || 0;
       els.statBrevoSent.textContent = totals.brevo_sent || 0;
+      if (els.statZohoSent) els.statZohoSent.textContent = totals.zoho_sent || 0;
+      if (els.statZeptoSent) els.statZeptoSent.textContent = totals.zepto_sent || 0;
 
       // Build chart datasets based on provider filter
       let sentData, bouncedData, sentLabel, bouncedLabel;
@@ -830,6 +834,16 @@
         bouncedData = data.brevo_bounced;
         sentLabel = "Brevo Sent";
         bouncedLabel = "Brevo Bounced";
+      } else if (currentProviderFilter === "zoho") {
+        sentData = data.zoho_sent;
+        bouncedData = data.zoho_bounced;
+        sentLabel = "Zoho Sent";
+        bouncedLabel = "Zoho Bounced";
+      } else if (currentProviderFilter === "zepto") {
+        sentData = data.zepto_sent;
+        bouncedData = data.zepto_bounced;
+        sentLabel = "ZeptoMail Sent";
+        bouncedLabel = "ZeptoMail Bounced";
       } else {
         sentData = data.sent;
         bouncedData = data.bounced;

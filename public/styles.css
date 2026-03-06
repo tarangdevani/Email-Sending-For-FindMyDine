@@ -2697,7 +2697,7 @@ body {
 
 .analytics-summary {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -2743,6 +2743,9 @@ body {
 .analytics-card-bounced .analytics-card-value { color: #ef4444; }
 .analytics-card-gmail .analytics-card-value { color: #ea580c; }
 .analytics-card-aws .analytics-card-value { color: #f59e0b; }
+.analytics-card-brevo .analytics-card-value { color: #8b5cf6; }
+.analytics-card-zoho .analytics-card-value { color: #0ea5e9; }
+.analytics-card-zepto .analytics-card-value { color: #14b8a6; }
 
 .analytics-chart-wrapper {
   background: var(--bg-secondary);
@@ -2864,7 +2867,7 @@ body {
 /* ══ Analytics Responsive ═════════════════════════════════ */
 @media (max-width: 900px) {
   .analytics-summary {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
