@@ -705,6 +705,7 @@ let bulkEmailState = {
   logs: [],
   startedAt: null,
   completedAt: null,
+  currentBatchId: null,  // tracks which batch is actively running
 };
 
 function resetBulkEmailState() {
@@ -717,6 +718,7 @@ function resetBulkEmailState() {
     logs: [],
     startedAt: null,
     completedAt: null,
+    currentBatchId: null,
   };
 }
 
@@ -1192,6 +1194,7 @@ async function runBulkEmail(batchId, emails, mailOptionsBase, batchData, customT
   const batchProvider = batchData.provider || "gmail";
   resetBulkEmailState();
   bulkEmailState.isRunning = true;
+  bulkEmailState.currentBatchId = batchId;  // track which batch is running
   bulkEmailState.total = emails.length;
   // Account for previously sent in UI optionally, starting simple
   bulkEmailState.sent = batchData.progressIndex || 0; 
@@ -1469,6 +1472,64 @@ app.get("/api/batches/:id/details", async (req, res) => {
   } catch (error) {
     console.error("Error fetching batch details:", error);
     res.status(500).json({ success: false, message: "Failed to fetch batch details", error: error.message });
+  }
+});
+
+// ─── Batch Pause ──────────────────────────────────────────
+app.post("/api/batches/:id/pause", async (req, res) => {
+  try {
+    const firestore = initFirebase();
+    const docRef = firestore.collection("email_batches").doc(req.params.id);
+    const doc = await docRef.get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ success: false, message: "Batch not found" });
+    }
+    if (doc.data().status === "completed") {
+      return res.status(400).json({ success: false, message: "Cannot pause a completed batch" });
+    }
+
+    // Set Firestore status to paused (cron will skip it on next tick)
+    await docRef.update({ status: "paused" });
+
+    // If this batch is actively running right now, stop it immediately
+    if (bulkEmailState.isRunning && bulkEmailState.currentBatchId === req.params.id) {
+      bulkEmailState.shouldStop = true;
+    }
+
+    res.json({ success: true, message: "Batch paused successfully" });
+  } catch (error) {
+    console.error("Error pausing batch:", error);
+    res.status(500).json({ success: false, message: "Failed to pause batch", error: error.message });
+  }
+});
+
+// ─── Batch Resume ─────────────────────────────────────────
+app.post("/api/batches/:id/resume", async (req, res) => {
+  try {
+    const firestore = initFirebase();
+    const docRef = firestore.collection("email_batches").doc(req.params.id);
+    const doc = await docRef.get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ success: false, message: "Batch not found" });
+    }
+    if (doc.data().status === "completed") {
+      return res.status(400).json({ success: false, message: "Cannot resume a completed batch" });
+    }
+
+    // Set status back to active so the cron picks it up within 60 seconds
+    // Also reset dailySentCount so today's limit resets fresh on resume
+    await docRef.update({
+      status: "active",
+      dailySentCount: 0,
+      lastRunDate: new Date().toISOString().split("T")[0],
+    });
+
+    res.json({ success: true, message: "Batch resumed. Will continue within 60 seconds." });
+  } catch (error) {
+    console.error("Error resuming batch:", error);
+    res.status(500).json({ success: false, message: "Failed to resume batch", error: error.message });
   }
 });
 

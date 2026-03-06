@@ -132,24 +132,40 @@
     const clockEl = document.getElementById("serverClock");
     if (!clockEl) return;
     let serverOffset = 0;
+    let serverTimezone = "UTC";
+    let synced = false;
+
+    clockEl.textContent = "🖥 Syncing...";
 
     async function syncServerTime() {
       try {
         const res = await fetch("/api/server-time");
         if (res.status === 401) { window.location.href = "/login.html"; return; }
         const data = await res.json();
+        // data.iso is always UTC (ISO 8601), so we calculate exact offset
         const serverTime = new Date(data.iso).getTime();
         serverOffset = serverTime - Date.now();
-        clockEl.title = `Server timezone: ${data.timezone}`;
-      } catch (e) { /* ignore */ }
+        serverTimezone = data.timezone || "UTC";
+        clockEl.title = `Server timezone: ${serverTimezone}`;
+        synced = true;
+      } catch (e) {
+        clockEl.textContent = "🖥 Server: N/A";
+      }
     }
 
     function tick() {
+      if (!synced) return; // wait for first sync
+      // serverNow is the true server-local timestamp
       const serverNow = new Date(Date.now() + serverOffset);
-      const h = String(serverNow.getHours()).padStart(2, "0");
-      const m = String(serverNow.getMinutes()).padStart(2, "0");
-      const s = String(serverNow.getSeconds()).padStart(2, "0");
-      clockEl.textContent = `🖥 Server: ${h}:${m}:${s}`;
+      // Use UTC methods because the offset already accounts for the server's timezone
+      // relative to UTC. The server sends its ISO (UTC) timestamp, so:
+      //   serverOffset = serverUTC_ms - browserUTC_ms
+      // serverNow = browser UTC + offset = server UTC
+      // So UTC methods here give server's actual UTC clock time.
+      const h = String(serverNow.getUTCHours()).padStart(2, "0");
+      const m = String(serverNow.getUTCMinutes()).padStart(2, "0");
+      const s = String(serverNow.getUTCSeconds()).padStart(2, "0");
+      clockEl.textContent = `🖥 Server: ${h}:${m}:${s} (UTC)`;
     }
 
     syncServerTime().then(tick);
@@ -633,6 +649,16 @@
       const statusClass = b.status.toLowerCase();
       const statusIcons = { processing: "⚡", paused: "⏸", completed: "✅" };
 
+      // Build pause/resume button based on current status
+      let pauseResumeBtn = "";
+      if (statusClass !== "completed") {
+        if (statusClass === "paused") {
+          pauseResumeBtn = `<button class="btn-batch-resume" id="btnPauseResume" data-action="resume" data-id="${batchId}" title="Resume this batch">▶ Resume</button>`;
+        } else {
+          pauseResumeBtn = `<button class="btn-batch-pause" id="btnPauseResume" data-action="pause" data-id="${batchId}" title="Pause this batch">⏸ Pause</button>`;
+        }
+      }
+
       els.detailOverlay.innerHTML = `
         <div class="detail-modal">
           <div class="detail-modal-header">
@@ -640,7 +666,10 @@
               <div class="detail-modal-title">${escapeHtml(b.subject)}</div>
               <div class="detail-modal-subtitle">Created: ${b.createdAt ? new Date(b.createdAt).toLocaleString() : '—'} · <span class="batch-listing-status ${statusClass}">${statusIcons[statusClass] || '⚡'} ${b.status}</span></div>
             </div>
-            <button class="btn-close-modal" id="btnCloseDetail">✕</button>
+            <div style="display:flex;align-items:center;gap:10px;">
+              ${pauseResumeBtn}
+              <button class="btn-close-modal" id="btnCloseDetail">✕</button>
+            </div>
           </div>
           <div class="detail-modal-stats">
             <div class="batch-counter"><span class="batch-counter-value total">${b.totalEmails}</span><span class="batch-counter-label">Total</span></div>
@@ -665,6 +694,39 @@
       $("#btnCloseDetail").addEventListener("click", () => {
         els.detailOverlay.style.display = "none";
       });
+
+      // Pause / Resume button
+      const prBtn = $("#btnPauseResume");
+      if (prBtn) {
+        prBtn.addEventListener("click", async () => {
+          const action = prBtn.dataset.action; // "pause" or "resume"
+          const confirmMsg = action === "pause"
+            ? "Pause this batch? The cron job will stop immediately and resume button will restart it."
+            : "Resume this batch? The cron job will pick it up within 60 seconds.";
+          if (!confirm(confirmMsg)) return;
+
+          prBtn.disabled = true;
+          prBtn.textContent = action === "pause" ? "⏸ Pausing..." : "▶ Resuming...";
+
+          try {
+            const r = await fetch(`/api/batches/${batchId}/${action}`, { method: "POST" });
+            const d = await r.json();
+            if (d.success) {
+              showToast(d.message, "success");
+              // Reload the modal to reflect updated status
+              openBatchDetail(batchId);
+            } else {
+              showToast(d.message || `Failed to ${action} batch`, "error");
+              prBtn.disabled = false;
+              prBtn.textContent = action === "pause" ? "⏸ Pause" : "▶ Resume";
+            }
+          } catch (err) {
+            showToast(`Network error while trying to ${action}`, "error");
+            prBtn.disabled = false;
+            prBtn.textContent = action === "pause" ? "⏸ Pause" : "▶ Resume";
+          }
+        });
+      }
 
       // Tab switching
       const emailDetails = b.emailDetails;
