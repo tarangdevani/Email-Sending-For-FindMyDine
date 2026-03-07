@@ -90,6 +90,7 @@
     statBrevoSent: $("#statBrevoSent"),
     statZohoSent: $("#statZohoSent"),
     statZeptoSent: $("#statZeptoSent"),
+    statSenderSent: $("#statSenderSent"),
     analyticsChart: $("#analyticsChart"),
 
     // Toast
@@ -572,6 +573,44 @@
           btn.dataset.bound = "true";
         }
       });
+
+      // Attach inline pause/resume listeners
+      $$(".btn-listing-action").forEach(btn => {
+        if (!btn.dataset.bound) {
+          btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const action = btn.dataset.action;
+            const batchId = btn.dataset.id;
+            
+            const confirmMsg = action === "pause"
+              ? "Pause this batch?"
+              : "Resume this batch?";
+            if (!confirm(confirmMsg)) return;
+
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = action === "pause" ? "⏸..." : "▶...";
+
+            try {
+              const r = await fetch(`/api/batches/${batchId}/${action}`, { method: "POST" });
+              const d = await r.json();
+              if (d.success) {
+                showToast(d.message, "success");
+                loadBatches(true); // reload list to show updated status
+              } else {
+                showToast(d.message || `Failed to ${action}`, "error");
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+              }
+            } catch (err) {
+              showToast("Network error", "error");
+              btn.disabled = false;
+              btn.innerHTML = originalText;
+            }
+          });
+          btn.dataset.bound = "true";
+        }
+      });
     } catch {
       isLoadingBatches = false;
       if (reset) {
@@ -593,6 +632,15 @@
     const statusClass = batch.status.toLowerCase();
     const statusIcons = { processing: "⚡", paused: "⏸", completed: "✅" };
     const statusIcon = statusIcons[statusClass] || "⚡";
+
+    let pauseResumeBtn = "";
+    if (statusClass !== "completed") {
+      if (statusClass === "paused") {
+        pauseResumeBtn = `<button class="btn-batch-resume btn-listing-action" data-action="resume" data-id="${batch.id}" title="Resume this batch">▶ Resume</button>`;
+      } else {
+        pauseResumeBtn = `<button class="btn-batch-pause btn-listing-action" data-action="pause" data-id="${batch.id}" title="Pause this batch">⏸ Pause</button>`;
+      }
+    }
 
     return `
       <div class="batch-listing-card">
@@ -626,7 +674,10 @@
             <span>📊 Limit: ${batch.dailyLimit ? batch.dailyLimit + '/day' : 'None'}</span>
             <span>🔄 ${batch.sendMethod === 'database' ? 'Database' : 'Manual'}</span>
           </div>
-          <button class="btn-batch-details" data-id="${batch.id}">📋 Details</button>
+          <div style="display:flex; gap:8px;">
+            ${pauseResumeBtn}
+            <button class="btn-batch-details" data-id="${batch.id}">📋 Details</button>
+          </div>
         </div>
       </div>`;
   }
@@ -664,11 +715,11 @@
       els.detailOverlay.innerHTML = `
         <div class="detail-modal">
           <div class="detail-modal-header">
-            <div>
+            <div style="flex:1;min-width:0;">
               <div class="detail-modal-title">${escapeHtml(b.subject)}</div>
               <div class="detail-modal-subtitle">Created: ${b.createdAt ? new Date(b.createdAt).toLocaleString() : '—'} · <span class="batch-listing-status ${statusClass}">${statusIcons[statusClass] || '⚡'} ${b.status}</span></div>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;">
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
               ${pauseResumeBtn}
               <button class="btn-close-modal" id="btnCloseDetail">✕</button>
             </div>
@@ -816,6 +867,7 @@
       els.statBrevoSent.textContent = totals.brevo_sent || 0;
       if (els.statZohoSent) els.statZohoSent.textContent = totals.zoho_sent || 0;
       if (els.statZeptoSent) els.statZeptoSent.textContent = totals.zepto_sent || 0;
+      if (els.statSenderSent) els.statSenderSent.textContent = totals.sender_sent || 0;
 
       // Build chart datasets based on provider filter
       let sentData, bouncedData, sentLabel, bouncedLabel;
@@ -844,6 +896,11 @@
         bouncedData = data.zepto_bounced;
         sentLabel = "ZeptoMail Sent";
         bouncedLabel = "ZeptoMail Bounced";
+      } else if (currentProviderFilter === "sender") {
+        sentData = data.sender_sent;
+        bouncedData = data.sender_bounced;
+        sentLabel = "Sender Sent";
+        bouncedLabel = "Sender Bounced";
       } else {
         sentData = data.sent;
         bouncedData = data.bounced;

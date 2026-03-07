@@ -708,6 +708,17 @@ const zeptoTransporter = nodemailer.createTransport({
   },
 });
 
+// Sender.net SMTP transporter
+const senderTransporter = nodemailer.createTransport({
+  host: process.env.SENDER_EMAIL_HOST || "smtp.sender.net",
+  port: parseInt(process.env.SENDER_EMAIL_PORT) || 587,
+  secure: (parseInt(process.env.SENDER_EMAIL_PORT) || 587) === 465,
+  auth: {
+    user: process.env.SENDER_EMAIL_USER,
+    pass: process.env.SENDER_EMAIL_PASS,
+  },
+});
+
 // Keep backward compat: default transporter = gmail
 const transporter = gmailTransporter;
 
@@ -716,6 +727,7 @@ function getTransporter(provider) {
   if (provider === "brevo") return { transporter: brevoTransporter, from: `"FindMyDine" <${process.env.BREVO_EMAIL_FROM || process.env.BREVO_EMAIL_USER}>` };
   if (provider === "zoho") return { transporter: zohoTransporter, from: `"FindMyDine" <${process.env.ZOHO_EMAIL_FROM || process.env.ZOHO_EMAIL_USER}>` };
   if (provider === "zepto") return { transporter: zeptoTransporter, from: `"FindMyDine" <${process.env.ZEPTO_EMAIL_FROM || process.env.ZEPTO_EMAIL_USER}>` };
+  if (provider === "sender") return { transporter: senderTransporter, from: `"FindMyDine" <${process.env.SENDER_EMAIL_FROM || process.env.SENDER_EMAIL_USER}>` };
   return { transporter: gmailTransporter, from: `"FindMyDine" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>` };
 }
 
@@ -939,7 +951,7 @@ app.get("/api/analytics", async (req, res) => {
       }
 
       if (!rawData[key]) {
-        rawData[key] = { sent: 0, bounces: 0, gmail_sent: 0, gmail_bounces: 0, aws_sent: 0, aws_bounces: 0, brevo_sent: 0, brevo_bounces: 0, zoho_sent: 0, zoho_bounces: 0, zepto_sent: 0, zepto_bounces: 0 };
+        rawData[key] = { sent: 0, bounces: 0, gmail_sent: 0, gmail_bounces: 0, aws_sent: 0, aws_bounces: 0, brevo_sent: 0, brevo_bounces: 0, zoho_sent: 0, zoho_bounces: 0, zepto_sent: 0, zepto_bounces: 0, sender_sent: 0, sender_bounces: 0 };
       }
       rawData[key].sent += data.sent || 0;
       rawData[key].bounces += data.bounces || 0;
@@ -953,6 +965,8 @@ app.get("/api/analytics", async (req, res) => {
       rawData[key].zoho_bounces += data.zoho_bounces || 0;
       rawData[key].zepto_sent += data.zepto_sent || 0;
       rawData[key].zepto_bounces += data.zepto_bounces || 0;
+      rawData[key].sender_sent += data.sender_sent || 0;
+      rawData[key].sender_bounces += data.sender_bounces || 0;
     });
 
     // Sort by key (date) and take last 30 entries
@@ -973,6 +987,8 @@ app.get("/api/analytics", async (req, res) => {
       zoho_bounced: recentKeys.map(k => rawData[k].zoho_bounces),
       zepto_sent: recentKeys.map(k => rawData[k].zepto_sent),
       zepto_bounced: recentKeys.map(k => rawData[k].zepto_bounces),
+      sender_sent: recentKeys.map(k => rawData[k].sender_sent),
+      sender_bounced: recentKeys.map(k => rawData[k].sender_bounces),
       totals: {
         sent: Object.values(rawData).reduce((s, d) => s + d.sent, 0),
         bounced: Object.values(rawData).reduce((s, d) => s + d.bounces, 0),
@@ -981,6 +997,7 @@ app.get("/api/analytics", async (req, res) => {
         brevo_sent: Object.values(rawData).reduce((s, d) => s + d.brevo_sent, 0),
         zoho_sent: Object.values(rawData).reduce((s, d) => s + d.zoho_sent, 0),
         zepto_sent: Object.values(rawData).reduce((s, d) => s + d.zepto_sent, 0),
+        sender_sent: Object.values(rawData).reduce((s, d) => s + d.sender_sent, 0),
       },
     };
 

@@ -2432,6 +2432,9 @@ body {
   font-weight: 700;
   letter-spacing: -0.02em;
   margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detail-modal-subtitle {
@@ -2697,7 +2700,7 @@ body {
 
 .analytics-summary {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(8, 1fr);
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -2746,6 +2749,7 @@ body {
 .analytics-card-brevo .analytics-card-value { color: #8b5cf6; }
 .analytics-card-zoho .analytics-card-value { color: #0ea5e9; }
 .analytics-card-zepto .analytics-card-value { color: #14b8a6; }
+.analytics-card-sender .analytics-card-value { color: #3b82f6; }
 
 .analytics-chart-wrapper {
   background: var(--bg-secondary);
