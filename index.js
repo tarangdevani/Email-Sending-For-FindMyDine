@@ -1920,6 +1920,27 @@ app.get("/*splat", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+// ─── MeiliSearch Keep-Alive Cronjob ───────────────────────
+const cron = require('node-cron');
+const { MeiliSearch } = require('meilisearch');
+
+const meiliClient = new MeiliSearch({
+  host: process.env.MEILISEARCH_HOST || "https://associated-elyse-findmydine-1dbd942c.koyeb.app",
+  apiKey: process.env.MEILISEARCH_KEY || "FindMyDine$999",
+});
+
+const searchClient = meiliClient.index('restaurants');
+
+// Run every 30 minutes
+cron.schedule('*/30 * * * *', async () => {
+  try {
+    const response = await searchClient.search("", { limit: 10 });
+    console.log(`[Cron] Pinged Meilisearch successfully. Found ${response.hits?.length || 0} hits.`);
+  } catch (err) {
+    console.error(`[Cron] Failed to ping Meilisearch:`, err.message);
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`✅ Server is running on http://localhost:${PORT}`);
